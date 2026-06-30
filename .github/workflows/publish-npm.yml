@@ -33,7 +33,7 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: Update npm for OIDC trusted publishing
+      - name: Update npm to latest
         run: npm install -g npm@latest
 
       - name: Install workspace
@@ -42,16 +42,16 @@ jobs:
       - name: Build all packages
         run: pnpm -r build
 
-      - name: Publish @namoidhq/js
+      - name: Stage @namoidhq/js
         if: ${{ inputs.package == 'both' || inputs.package == 'js' }}
         working-directory: packages/js
         run: |
           pnpm pack
-          npm publish *.tgz --access public
+          npm stage publish *.tgz
 
-      - name: Publish @namoidhq/react
+      - name: Stage @namoidhq/react
         if: ${{ inputs.package == 'both' || inputs.package == 'react' }}
         working-directory: packages/react
         run: |
           pnpm pack
-          npm publish *.tgz --access public
+          npm stage publish *.tgz
