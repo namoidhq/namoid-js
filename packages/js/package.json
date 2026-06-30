@@ -1,0 +1,56 @@
+{
+  "name": "@namoidhq/js",
+  "version": "0.1.0",
+  "description": "Core JavaScript SDK for NamoID, enterprise identity for India (OAuth 2.1 / OIDC): hosted login URLs, auth config, and session helpers.",
+  "keywords": [
+    "namoid",
+    "authentication",
+    "auth",
+    "oauth",
+    "oauth2",
+    "oidc",
+    "openid-connect",
+    "identity",
+    "sso",
+    "passkeys",
+    "mfa",
+    "india",
+    "dpdp",
+    "digilocker",
+    "aadhaar"
+  ],
+  "homepage": "https://namoid.in",
+  "bugs": {
+    "url": "https://namoid.in",
+    "email": "hello@namoid.in"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/namoidhq/namoid-js.git",
+    "directory": "packages/js"
+  },
+  "license": "MIT",
+  "author": "PolyMindsLabs Pvt. Ltd. <hello@namoid.in> (https://namoid.in)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
