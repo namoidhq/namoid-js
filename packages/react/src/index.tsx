@@ -1,0 +1,355 @@
+"use client";
+
+import {
+  createNamoIDClient,
+  type HostedLoginMode,
+  type HostedLoginUrlOptions,
+  type NamoIDAuthConfig,
+  type NamoIDClient,
+  type NamoIDClientOptions,
+} from "@namoidhq/js";
+import {
+  createContext,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+export type NamoIDProviderProps = NamoIDClientOptions & {
+  children: ReactNode;
+};
+
+const NamoIDContext = createContext<NamoIDClient | null>(null);
+
+export function NamoIDProvider({
+  children,
+  publishableKey,
+  apiBaseUrl,
+  hostedLoginBaseUrl,
+  fetcher,
+}: NamoIDProviderProps) {
+  const client = useMemo(
+    () => createNamoIDClient({ publishableKey, apiBaseUrl, hostedLoginBaseUrl, fetcher }),
+    [publishableKey, apiBaseUrl, hostedLoginBaseUrl, fetcher],
+  );
+
+  return <NamoIDContext.Provider value={client}>{children}</NamoIDContext.Provider>;
+}
+
+export function useNamoID(): NamoIDClient {
+  const client = useContext(NamoIDContext);
+  if (!client) {
+    throw new Error("useNamoID must be used inside <NamoIDProvider>");
+  }
+  return client;
+}
+
+export type UseAuthConfigState = {
+  config: NamoIDAuthConfig | null;
+  loading: boolean;
+  error: Error | null;
+  reload: () => Promise<void>;
+};
+
+export function useAuthConfig(): UseAuthConfigState {
+  const client = useNamoID();
+  const [config, setConfig] = useState<NamoIDAuthConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const reload = useMemo(
+    () => async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        setConfig(await client.auth.getConfig());
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error("Failed to load NamoID config"));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { config, loading, error, reload };
+}
+
+export type HostedLoginButtonProps = Omit<HostedLoginUrlOptions, "mode"> & {
+  mode?: HostedLoginMode;
+  children?: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+  disabled?: boolean;
+};
+
+export function HostedLoginButton({
+  mode = "signin",
+  children,
+  className,
+  style,
+  disabled,
+  ...options
+}: HostedLoginButtonProps) {
+  const client = useNamoID();
+  const ready = Boolean(options.clientId && options.redirectUri);
+
+  return (
+    <button
+      type="button"
+      className={className}
+      style={{ ...styles.button, ...style }}
+      disabled={disabled || !ready}
+      onClick={() => client.hostedLogin.redirect({ ...options, mode })}
+    >
+      {children ?? labelForMode(mode)}
+    </button>
+  );
+}
+
+export type AuthFlowProps = {
+  clientId: string;
+  redirectUri: string;
+  className?: string;
+  title?: string;
+  description?: string;
+  buttonLabel?: string;
+  loadingLabel?: string;
+  unavailableLabel?: string;
+  scope?: string | string[];
+  state?: string;
+  nonce?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: "S256" | "plain";
+};
+
+export function SignIn(props: AuthFlowProps) {
+  return (
+    <AuthPanel
+      {...props}
+      mode="signin"
+      title={props.title ?? "Sign in"}
+      description={props.description ?? "Continue with the sign-in methods enabled for this app."}
+      buttonLabel={props.buttonLabel ?? "Sign in with NamoID"}
+      enabled={(config) => config.signin_methods.length > 0}
+    />
+  );
+}
+
+export function SignUp(props: AuthFlowProps) {
+  return (
+    <AuthPanel
+      {...props}
+      mode="signup"
+      title={props.title ?? "Create account"}
+      description={props.description ?? "Start the hosted signup flow for this app."}
+      buttonLabel={props.buttonLabel ?? "Sign up with NamoID"}
+      unavailableLabel={props.unavailableLabel ?? "Signups are currently paused."}
+      enabled={(config) => config.access_mode !== "closed"}
+    />
+  );
+}
+
+export type WaitlistProps = Omit<AuthFlowProps, "buttonLabel"> & {
+  buttonLabel?: string;
+  onSubmitEmail?: (email: string, config: NamoIDAuthConfig | null) => Promise<void> | void;
+};
+
+export function Waitlist({
+  onSubmitEmail,
+  buttonLabel = "Join waitlist",
+  title = "Join the waitlist",
+  description = "Leave your email and we will route you through the configured access flow.",
+  ...props
+}: WaitlistProps) {
+  const { config, loading, error } = useAuthConfig();
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const canSubmitLocally = Boolean(onSubmitEmail);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (onSubmitEmail) {
+      await onSubmitEmail(email, config);
+      setSubmitted(true);
+    }
+  };
+
+  return (
+    <section className={props.className} style={styles.card}>
+      <PanelHeader title={title} description={description} />
+      <StatusLine config={config} loading={loading} error={error} />
+      {submitted ? (
+        <p style={styles.success}>You are on the list.</p>
+      ) : (
+        <form onSubmit={submit} style={styles.form}>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            required
+            style={styles.input}
+          />
+          {canSubmitLocally ? (
+            <button type="submit" style={styles.button}>
+              {buttonLabel}
+            </button>
+          ) : (
+            <HostedLoginButton {...props} mode="waitlist">
+              {buttonLabel}
+            </HostedLoginButton>
+          )}
+        </form>
+      )}
+    </section>
+  );
+}
+
+export function AuthCard(props: AuthFlowProps & { mode?: HostedLoginMode }) {
+  if (props.mode === "signup") return <SignUp {...props} />;
+  if (props.mode === "waitlist") return <Waitlist {...props} />;
+  return <SignIn {...props} />;
+}
+
+function AuthPanel({
+  mode,
+  title,
+  description,
+  buttonLabel,
+  loadingLabel = "Loading auth configuration...",
+  unavailableLabel = "This flow is not enabled right now.",
+  enabled,
+  className,
+  ...buttonOptions
+}: AuthFlowProps & {
+  mode: HostedLoginMode;
+  title: string;
+  description: string;
+  buttonLabel: string;
+  loadingLabel?: string;
+  unavailableLabel?: string;
+  enabled: (config: NamoIDAuthConfig) => boolean;
+}) {
+  const { config, loading, error } = useAuthConfig();
+  const isEnabled = config ? enabled(config) : false;
+
+  return (
+    <section className={className} style={styles.card}>
+      <PanelHeader title={title} description={description} />
+      <StatusLine config={config} loading={loading} error={error} loadingLabel={loadingLabel} />
+      <HostedLoginButton {...buttonOptions} mode={mode} disabled={loading || Boolean(error) || !isEnabled}>
+        {isEnabled ? buttonLabel : unavailableLabel}
+      </HostedLoginButton>
+    </section>
+  );
+}
+
+function PanelHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div style={styles.header}>
+      <h2 style={styles.title}>{title}</h2>
+      <p style={styles.description}>{description}</p>
+    </div>
+  );
+}
+
+function StatusLine({
+  config,
+  loading,
+  error,
+  loadingLabel = "Loading auth configuration...",
+}: {
+  config: NamoIDAuthConfig | null;
+  loading: boolean;
+  error: Error | null;
+  loadingLabel?: string;
+}) {
+  if (loading) return <p style={styles.meta}>{loadingLabel}</p>;
+  if (error) return <p style={styles.error}>{error.message}</p>;
+  if (!config) return null;
+  return (
+    <p style={styles.meta}>
+      {config.access_mode} access · {config.signin_methods.length} sign-in method
+      {config.signin_methods.length === 1 ? "" : "s"}
+    </p>
+  );
+}
+
+function labelForMode(mode: HostedLoginMode): string {
+  if (mode === "signup") return "Sign up with NamoID";
+  if (mode === "waitlist") return "Join waitlist";
+  return "Sign in with NamoID";
+}
+
+const styles: Record<string, CSSProperties> = {
+  card: {
+    border: "1px solid #deded8",
+    borderRadius: 8,
+    padding: 18,
+    background: "#ffffff",
+    color: "#111111",
+    display: "grid",
+    gap: 14,
+  },
+  header: {
+    display: "grid",
+    gap: 4,
+  },
+  title: {
+    margin: 0,
+    fontSize: 18,
+    lineHeight: 1.2,
+    fontWeight: 650,
+  },
+  description: {
+    margin: 0,
+    color: "#62645f",
+    fontSize: 14,
+    lineHeight: 1.45,
+  },
+  meta: {
+    margin: 0,
+    color: "#73756f",
+    fontSize: 12,
+  },
+  error: {
+    margin: 0,
+    color: "#9f1d1d",
+    fontSize: 12,
+  },
+  success: {
+    margin: 0,
+    color: "#17633e",
+    fontSize: 14,
+  },
+  form: {
+    display: "grid",
+    gap: 10,
+  },
+  input: {
+    border: "1px solid #c9cac2",
+    borderRadius: 7,
+    padding: "10px 12px",
+    fontSize: 14,
+  },
+  button: {
+    border: 0,
+    borderRadius: 7,
+    background: "#111111",
+    color: "#ffffff",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 650,
+    minHeight: 42,
+    padding: "0 16px",
+  },
+};
