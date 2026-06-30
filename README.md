@@ -1,5 +1,9 @@
 # NamoID JavaScript SDKs
 
+[![@namoidhq/js](https://img.shields.io/npm/v/@namoidhq/js.svg?label=%40namoidhq%2Fjs)](https://www.npmjs.com/package/@namoidhq/js)
+[![@namoidhq/react](https://img.shields.io/npm/v/@namoidhq/react.svg?label=%40namoidhq%2Freact)](https://www.npmjs.com/package/@namoidhq/react)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 The JavaScript/TypeScript SDKs for [NamoID](https://namoid.in) — enterprise
 identity for India (OAuth 2.1 / OIDC). A pnpm monorepo; every JS/TS package
 lives here.
@@ -42,6 +46,13 @@ packages/
   js/        @namoidhq/js     (core)
   react/     @namoidhq/react
 ```
+
+## Links
+
+- Website — [namoid.in](https://namoid.in)
+- Docs — [docs.namoid.in](https://docs.namoid.in)
+- Contact — [hello@namoid.in](mailto:hello@namoid.in)
+- Issues — [github.com/namoidhq/namoid-js/issues](https://github.com/namoidhq/namoid-js/issues)
 
 ## License
 
