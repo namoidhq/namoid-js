@@ -33,6 +33,9 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
+      - name: Update npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+
       - name: Install workspace
         run: pnpm install
 
@@ -42,13 +45,13 @@ jobs:
       - name: Publish @namoidhq/js
         if: ${{ inputs.package == 'both' || inputs.package == 'js' }}
         working-directory: packages/js
-        run: pnpm publish --provenance --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          pnpm pack
+          npm publish *.tgz --access public
 
       - name: Publish @namoidhq/react
         if: ${{ inputs.package == 'both' || inputs.package == 'react' }}
         working-directory: packages/react
-        run: pnpm publish --provenance --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          pnpm pack
+          npm publish *.tgz --access public
