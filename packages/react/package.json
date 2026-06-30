@@ -21,7 +21,7 @@
   ],
   "homepage": "https://namoid.in",
   "bugs": {
-    "url": "https://namoid.in",
+    "url": "https://github.com/namoidhq/namoid-js/issues",
     "email": "hello@namoid.in"
   },
   "repository": {
