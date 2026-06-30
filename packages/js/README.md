@@ -20,7 +20,7 @@ namoid.hostedLogin.redirect({
 
 For React, use [`@namoidhq/react`](https://www.npmjs.com/package/@namoidhq/react).
 
-Docs: <https://namoid.in> · Early access: hello@namoid.in
+Docs: <https://namoid.in> · Contact: hello@namoid.in
 
 ## License
 

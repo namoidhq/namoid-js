@@ -20,7 +20,7 @@ export function App() {
 
 Built on [`@namoidhq/js`](https://www.npmjs.com/package/@namoidhq/js).
 
-Docs: <https://namoid.in> · Early access: hello@namoid.in
+Docs: <https://namoid.in> · Contact: hello@namoid.in
 
 ## License
 
