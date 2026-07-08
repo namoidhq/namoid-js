@@ -6,11 +6,12 @@ on:
       package:
         description: "Which package(s) to publish"
         type: choice
-        default: both
+        default: all
         options:
-          - both
+          - all
           - js
           - react
+          - nextjs
 
 concurrency:
   group: publish-npm
@@ -37,21 +38,31 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Install workspace
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck all packages
+        run: pnpm -r typecheck
 
       - name: Build all packages
         run: pnpm -r build
 
       - name: Stage @namoidhq/js
-        if: ${{ inputs.package == 'both' || inputs.package == 'js' }}
+        if: ${{ inputs.package == 'all' || inputs.package == 'js' }}
         working-directory: packages/js
         run: |
           pnpm pack
           npm stage publish *.tgz
 
       - name: Stage @namoidhq/react
-        if: ${{ inputs.package == 'both' || inputs.package == 'react' }}
+        if: ${{ inputs.package == 'all' || inputs.package == 'react' }}
         working-directory: packages/react
+        run: |
+          pnpm pack
+          npm stage publish *.tgz
+
+      - name: Stage @namoidhq/nextjs
+        if: ${{ inputs.package == 'all' || inputs.package == 'nextjs' }}
+        working-directory: packages/nextjs
         run: |
           pnpm pack
           npm stage publish *.tgz
