@@ -413,7 +413,10 @@ function sanitizeReturnTo(value: string): string {
 }
 
 function errorCode(error: unknown): string {
-  if (error instanceof NamoIDError && error.code) return error.code;
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const value = (error as { code?: unknown }).code;
+    if (typeof value === "string" && value) return value;
+  }
   if (error instanceof Error && error.message) return error.message;
   return "auth_callback_failed";
 }
