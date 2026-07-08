@@ -250,48 +250,6 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   return client;
 }
 
-export async function exchangeNamoIDCodeForSession(options: {
-  apiBaseUrl: string;
-  idToken: string;
-  issuer: string;
-  clientId: string;
-  nonce: string;
-  sessionMintToken?: string;
-  fetcher?: typeof fetch;
-}): Promise<unknown> {
-  const fetcher = options.fetcher ?? globalThis.fetch;
-  if (!fetcher) throw new NamoIDError("fetch is not available; pass a fetcher option", { code: "missing_fetch" });
-  const headers: Record<string, string> = {
-    accept: "application/json",
-    "content-type": "application/json",
-  };
-  if (options.sessionMintToken) headers["x-console-session-mint-token"] = options.sessionMintToken;
-  const response = await fetcher(new URL("/v1/auth/oidc-session", ensureTrailingSlash(options.apiBaseUrl)), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      id_token: options.idToken,
-      issuer: trimTrailingSlash(options.issuer),
-      client_id: options.clientId,
-      nonce: options.nonce,
-    }),
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = null;
-    }
-    throw new NamoIDError(`NamoID session exchange failed with ${response.status}`, {
-      status: response.status,
-      code: "session_exchange_failed",
-      detail,
-    });
-  }
-  return response.json();
-}
 
 export function buildLogoutUrl(options: {
   issuer: string;
