@@ -1,16 +1,12 @@
 {
   "name": "@namoidhq/react",
-  "version": "0.1.0",
-  "description": "React SDK for NamoID, enterprise identity for India (OAuth 2.1 / OIDC): provider, hooks, and hosted sign-in, sign-up, and waitlist components.",
+  "version": "1.0.0",
+  "description": "React SDK for NamoID Hosted Auth: provider, hooks, and hosted sign-in, sign-up, and waitlist components.",
   "keywords": [
     "namoid",
     "authentication",
     "auth",
-    "oauth",
-    "oidc",
-    "openid-connect",
     "identity",
-    "sso",
     "passkeys",
     "mfa",
     "india",

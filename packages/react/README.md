@@ -1,6 +1,6 @@
 # @namoidhq/react
 
-React SDK for **NamoID** — identity infrastructure for India (OAuth 2.1 / OpenID Connect). Wrap your app in a provider, then use hooks and components for hosted sign-in, sign-up, and waitlist flows.
+React SDK for **NamoID** — hosted identity infrastructure for India. Wrap your app in a provider, then use components for Hosted Auth sign-in, sign-up, and waitlist flows.
 
 ```bash
 npm i @namoidhq/react @namoidhq/js
@@ -11,17 +11,14 @@ import { NamoIDProvider, SignIn } from "@namoidhq/react";
 
 export function App() {
   return (
-    <NamoIDProvider publishableKey="pk_live_...">
-      <SignIn
-        clientId="your_client_id"
-        redirectUri="https://your-app.com/callback"
-      />
+    <NamoIDProvider publishableKey="namoid_auth_pk_live_...">
+      <SignIn returnTo="https://your-app.com/auth/callback" />
     </NamoIDProvider>
   );
 }
 ```
 
-React components are UI-only. They redirect to hosted login and never store OAuth tokens. For server-side callback handling in Next.js, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs).
+React components use Hosted Auth, create a public PKCE transaction, and never store durable refresh tokens. For server-side callback handling in Next.js, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs).
 
 Docs: <https://namoid.in> · Contact: hello@namoid.in
 
