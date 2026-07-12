@@ -5,13 +5,13 @@
 [![@namoidhq/nextjs](https://img.shields.io/npm/v/@namoidhq/nextjs.svg?label=%40namoidhq%2Fnextjs)](https://www.npmjs.com/package/@namoidhq/nextjs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-The JavaScript/TypeScript SDKs for [NamoID](https://namoid.in) — identity infrastructure for India (OAuth 2.1 / OIDC). A pnpm monorepo; every JS/TS package lives here.
+The JavaScript/TypeScript SDKs for [NamoID](https://namoid.in) Hosted Auth. A pnpm monorepo; every JS/TS package lives here.
 
 ## Packages
 
 | Package | npm | What it is |
 |---|---|---|
-| [`@namoidhq/js`](./packages/js) | `@namoidhq/js` | Core SDK — hosted-login URLs, auth config, OIDC discovery, PKCE, token exchange, JWT verification helpers |
+| [`@namoidhq/js`](./packages/js) | `@namoidhq/js` | Core SDK — Hosted Auth URLs, auth config, PKCE transactions, token exchange, and native session helpers |
 | [`@namoidhq/react`](./packages/react) | `@namoidhq/react` | React provider, hooks, and hosted sign-in / sign-up / waitlist components |
 | [`@namoidhq/nextjs`](./packages/nextjs) | `@namoidhq/nextjs` | Next.js route-handler adapter — PKCE redirects, callback handling, and secure transaction cookies |
 

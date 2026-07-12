@@ -7,7 +7,8 @@
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "@namoidhq/js": ["../js/dist/index.d.ts"]
+      "@namoidhq/js": ["../js/dist/index.d.ts"],
+      "@namoidhq/js/server": ["../js/dist/server.d.ts"]
     },
     "strict": true,
     "declaration": true,

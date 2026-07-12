@@ -1,17 +1,12 @@
 {
   "name": "@namoidhq/js",
-  "version": "0.1.1",
-  "description": "Core JavaScript SDK for NamoID, enterprise identity for India (OAuth 2.1 / OIDC): hosted login URLs, auth config, and session helpers.",
+  "version": "1.0.0",
+  "description": "Core JavaScript SDK for NamoID Hosted Auth: auth configuration, hosted sign-in URLs, and native session helpers.",
   "keywords": [
     "namoid",
     "authentication",
     "auth",
-    "oauth",
-    "oauth2",
-    "oidc",
-    "openid-connect",
     "identity",
-    "sso",
     "passkeys",
     "mfa",
     "india",
@@ -39,6 +34,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     }
   },
   "files": [

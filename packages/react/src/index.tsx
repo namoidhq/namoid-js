@@ -2,11 +2,11 @@
 
 import {
   createNamoIDClient,
-  type HostedLoginMode,
-  type HostedLoginUrlOptions,
+  type HostedAuthMode,
   type NamoIDAuthConfig,
   type NamoIDClient,
   type NamoIDClientOptions,
+  type NamoIDTokenResponse,
 } from "@namoidhq/js";
 import {
   createContext,
@@ -29,12 +29,12 @@ export function NamoIDProvider({
   children,
   publishableKey,
   apiBaseUrl,
-  hostedLoginBaseUrl,
+  hostedAuthBaseUrl,
   fetcher,
 }: NamoIDProviderProps) {
   const client = useMemo(
-    () => createNamoIDClient({ publishableKey, apiBaseUrl, hostedLoginBaseUrl, fetcher }),
-    [publishableKey, apiBaseUrl, hostedLoginBaseUrl, fetcher],
+    () => createNamoIDClient({ publishableKey, apiBaseUrl, hostedAuthBaseUrl, fetcher }),
+    [publishableKey, apiBaseUrl, hostedAuthBaseUrl, fetcher],
   );
 
   return <NamoIDContext.Provider value={client}>{children}</NamoIDContext.Provider>;
@@ -83,32 +83,54 @@ export function useAuthConfig(): UseAuthConfigState {
   return { config, loading, error, reload };
 }
 
-export type HostedLoginButtonProps = Omit<HostedLoginUrlOptions, "mode"> & {
-  mode?: HostedLoginMode;
+export type HostedAuthButtonProps = {
+  mode?: HostedAuthMode;
+  returnTo: string;
   children?: ReactNode;
   className?: string;
   style?: CSSProperties;
   disabled?: boolean;
 };
 
-export function HostedLoginButton({
-  mode = "signin",
+export function HostedAuthButton({
+  mode = "sign_in",
+  returnTo,
   children,
   className,
   style,
   disabled,
-  ...options
-}: HostedLoginButtonProps) {
+}: HostedAuthButtonProps) {
   const client = useNamoID();
-  const ready = Boolean(options.clientId && options.redirectUri);
+  const [starting, setStarting] = useState(false);
+
+  const start = async () => {
+    setStarting(true);
+    try {
+      const transaction = await client.hostedAuth.createPublicTransaction();
+      sessionStorage.setItem(
+        transactionStorageKey(client.publishableKey),
+        JSON.stringify(transaction),
+      );
+      await client.hostedAuth.redirect({
+        mode,
+        returnTo,
+        state: transaction.state,
+        completionMode: "public",
+        codeChallenge: transaction.codeChallenge,
+        codeChallengeMethod: transaction.codeChallengeMethod,
+      });
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <button
       type="button"
       className={className}
       style={{ ...styles.button, ...style }}
-      disabled={disabled || !ready}
-      onClick={() => client.hostedLogin.redirect({ ...options, mode })}
+      disabled={disabled || starting || !returnTo}
+      onClick={() => void start()}
     >
       {children ?? labelForMode(mode)}
     </button>
@@ -116,26 +138,20 @@ export function HostedLoginButton({
 }
 
 export type AuthFlowProps = {
-  clientId: string;
-  redirectUri: string;
+  returnTo: string;
   className?: string;
   title?: string;
   description?: string;
   buttonLabel?: string;
   loadingLabel?: string;
   unavailableLabel?: string;
-  scope?: string | string[];
-  state?: string;
-  nonce?: string;
-  codeChallenge?: string;
-  codeChallengeMethod?: "S256" | "plain";
 };
 
 export function SignIn(props: AuthFlowProps) {
   return (
     <AuthPanel
       {...props}
-      mode="signin"
+      mode="sign_in"
       title={props.title ?? "Sign in"}
       description={props.description ?? "Continue with the sign-in methods enabled for this app."}
       buttonLabel={props.buttonLabel ?? "Sign in with NamoID"}
@@ -148,7 +164,7 @@ export function SignUp(props: AuthFlowProps) {
   return (
     <AuthPanel
       {...props}
-      mode="signup"
+      mode="sign_up"
       title={props.title ?? "Create account"}
       description={props.description ?? "Start the hosted signup flow for this app."}
       buttonLabel={props.buttonLabel ?? "Sign up with NamoID"}
@@ -204,9 +220,9 @@ export function Waitlist({
               {buttonLabel}
             </button>
           ) : (
-            <HostedLoginButton {...props} mode="waitlist">
+            <HostedAuthButton {...props} mode="waitlist">
               {buttonLabel}
-            </HostedLoginButton>
+            </HostedAuthButton>
           )}
         </form>
       )}
@@ -214,8 +230,8 @@ export function Waitlist({
   );
 }
 
-export function AuthCard(props: AuthFlowProps & { mode?: HostedLoginMode }) {
-  if (props.mode === "signup") return <SignUp {...props} />;
+export function AuthCard(props: AuthFlowProps & { mode?: HostedAuthMode }) {
+  if (props.mode === "sign_up") return <SignUp {...props} />;
   if (props.mode === "waitlist") return <Waitlist {...props} />;
   return <SignIn {...props} />;
 }
@@ -231,7 +247,7 @@ function AuthPanel({
   className,
   ...buttonOptions
 }: AuthFlowProps & {
-  mode: HostedLoginMode;
+  mode: HostedAuthMode;
   title: string;
   description: string;
   buttonLabel: string;
@@ -246,9 +262,9 @@ function AuthPanel({
     <section className={className} style={styles.card}>
       <PanelHeader title={title} description={description} />
       <StatusLine config={config} loading={loading} error={error} loadingLabel={loadingLabel} />
-      <HostedLoginButton {...buttonOptions} mode={mode} disabled={loading || Boolean(error) || !isEnabled}>
+      <HostedAuthButton {...buttonOptions} mode={mode} disabled={loading || Boolean(error) || !isEnabled}>
         {isEnabled ? buttonLabel : unavailableLabel}
-      </HostedLoginButton>
+      </HostedAuthButton>
     </section>
   );
 }
@@ -284,10 +300,34 @@ function StatusLine({
   );
 }
 
-function labelForMode(mode: HostedLoginMode): string {
-  if (mode === "signup") return "Sign up with NamoID";
+function labelForMode(mode: HostedAuthMode): string {
+  if (mode === "sign_up") return "Sign up with NamoID";
   if (mode === "waitlist") return "Join waitlist";
   return "Sign in with NamoID";
+}
+
+export async function completeHostedAuthRedirect(
+  client: NamoIDClient,
+  callbackUrl: string = window.location.href,
+): Promise<NamoIDTokenResponse> {
+  const url = new URL(callbackUrl);
+  const code = url.searchParams.get("code");
+  const returnedState = url.searchParams.get("state");
+  const storageKey = transactionStorageKey(client.publishableKey);
+  const raw = sessionStorage.getItem(storageKey);
+  if (!code || !returnedState || !raw) {
+    throw new Error("Hosted Auth callback is missing its transaction");
+  }
+  const transaction = JSON.parse(raw) as { state: string; codeVerifier: string };
+  if (transaction.state !== returnedState) {
+    throw new Error("Hosted Auth state mismatch");
+  }
+  sessionStorage.removeItem(storageKey);
+  return client.hostedAuth.exchangeCode({ code, codeVerifier: transaction.codeVerifier });
+}
+
+function transactionStorageKey(publishableKey: string): string {
+  return `namoid_hosted_auth:${publishableKey.slice(-12)}`;
 }
 
 const styles: Record<string, CSSProperties> = {
