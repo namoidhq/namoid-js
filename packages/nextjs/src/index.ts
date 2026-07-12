@@ -6,8 +6,8 @@ import {
   revokeNativeSession,
   type HostedAuthMode,
   type NamoIDTokenResponse,
-  validateAuthToken,
 } from "@namoidhq/js";
+import { validateAuthToken } from "@namoidhq/js/server";
 
 export type NamoIDNextOptions = {
   hostedAuthBaseUrl: string;

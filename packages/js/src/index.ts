@@ -64,15 +64,6 @@ export type NamoIDTokenResponse = {
   [claim: string]: unknown;
 };
 
-export type AuthTokenValidation = {
-  valid: boolean;
-  user_id: string | null;
-  session_id: string | null;
-  client_id: string | null;
-  scopes: string[];
-  error: string | null;
-};
-
 export type NamoIDClientOptions = {
   publishableKey: string;
   apiBaseUrl?: string;
@@ -213,37 +204,6 @@ export async function exchangeHostedAuthCode(
     });
   }
   return (await response.json()) as NamoIDTokenResponse;
-}
-
-export async function validateAuthToken(options: {
-  token: string;
-  apiKey: string;
-  apiBaseUrl?: string;
-  fetcher?: typeof fetch;
-}): Promise<AuthTokenValidation> {
-  const fetcher = requireFetch(options.fetcher);
-  const response = await fetcher(
-    new URL("/v1/auth/tokens/validate", normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL)),
-    {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        "X-API-Key": options.apiKey,
-      },
-      body: JSON.stringify({ token: options.token }),
-      cache: "no-store",
-    },
-  );
-  if (!response.ok) {
-    const body = await safeJson(response);
-    throw new NamoIDError(readErrorMessage(body) ?? `Token validation failed with ${response.status}`, {
-      status: response.status,
-      code: readErrorCode(body) ?? "token_validation_failed",
-      detail: body,
-    });
-  }
-  return (await response.json()) as AuthTokenValidation;
 }
 
 export async function revokeNativeSession(options: {

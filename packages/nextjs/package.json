@@ -39,7 +39,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "pnpm --dir ../js build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@namoidhq/js": "workspace:^"

@@ -2,7 +2,7 @@
 
 Core JavaScript SDK for **NamoID Hosted Auth**.
 
-Use it to fetch auth config, build Hosted Auth URLs, create public PKCE transactions, exchange hosted codes, validate tokens server-side, and revoke native sessions.
+Use it to fetch auth config, build Hosted Auth URLs, create public PKCE transactions, exchange hosted codes, and revoke native sessions.
 
 ```bash
 npm i @namoidhq/js
@@ -26,6 +26,19 @@ namoid.hostedAuth.redirect({
 ```
 
 For Next.js apps, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs) so transaction cookies and callback validation are handled for you.
+
+Server-side token validation is available from the server-only subpath:
+
+```ts
+import { validateAuthToken } from "@namoidhq/js/server";
+
+const result = await validateAuthToken({
+  token: accessToken,
+  apiKey: process.env.NAMOID_AUTH_SECRET_KEY!,
+});
+```
+
+Never expose the auth secret key or this server-only helper in browser code.
 
 Docs: <https://namoid.in> · Contact: hello@namoid.in
 
