@@ -14,6 +14,10 @@ Hosted Auth is the complete integration surface for this package. Browser code
 uses a publishable key; server-side callback handling uses the environment auth
 secret key.
 
+The auth secret key identifies the application. The SDK reads its browser-safe
+configuration and resolves the correct Hosted Auth domain automatically. An
+application ID and Hosted Auth URL are not required.
+
 ```bash
 npm i @namoidhq/nextjs @namoidhq/js
 ```
@@ -26,10 +30,9 @@ npm i @namoidhq/nextjs @namoidhq/js
 import { createNamoIDNextClient } from "@namoidhq/nextjs";
 
 const namoid = createNamoIDNextClient({
-  hostedAuthBaseUrl: process.env.NAMOID_HOSTED_AUTH_URL!,
   authSecretKey: process.env.NAMOID_AUTH_SECRET_KEY!,
   appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
-  redirectPath: "/api/auth/callback/namoid",
+  callbackPath: "/api/auth/callback/namoid",
   postLoginRedirectPath: "/dashboard",
 });
 
@@ -42,17 +45,15 @@ export const GET = () => namoid.login();
 import { createNamoIDNextClient } from "@namoidhq/nextjs";
 
 const namoid = createNamoIDNextClient({
-  hostedAuthBaseUrl: process.env.NAMOID_HOSTED_AUTH_URL!,
   authSecretKey: process.env.NAMOID_AUTH_SECRET_KEY!,
   appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
-  redirectPath: "/api/auth/callback/namoid",
+  callbackPath: "/api/auth/callback/namoid",
   postLoginRedirectPath: "/dashboard",
 });
 
 export const GET = (request: Request) =>
   namoid.callback(request, {
-    async onSuccess({ tokens, idTokenClaims }) {
-      // Create your own HttpOnly app session here.
+    async onSuccess({ tokens }) {
       // Create your own HttpOnly app session here.
       return new Response(null, {
         status: 302,

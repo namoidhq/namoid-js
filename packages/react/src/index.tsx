@@ -29,12 +29,11 @@ export function NamoIDProvider({
   children,
   publishableKey,
   apiBaseUrl,
-  hostedAuthBaseUrl,
   fetcher,
 }: NamoIDProviderProps) {
   const client = useMemo(
-    () => createNamoIDClient({ publishableKey, apiBaseUrl, hostedAuthBaseUrl, fetcher }),
-    [publishableKey, apiBaseUrl, hostedAuthBaseUrl, fetcher],
+    () => createNamoIDClient({ publishableKey, apiBaseUrl, fetcher }),
+    [publishableKey, apiBaseUrl, fetcher],
   );
 
   return <NamoIDContext.Provider value={client}>{children}</NamoIDContext.Provider>;

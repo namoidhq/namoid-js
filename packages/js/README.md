@@ -13,7 +13,9 @@ npm i @namoidhq/js
 ```js
 import { createNamoIDClient } from "@namoidhq/js";
 
-const namoid = createNamoIDClient({ publishableKey: "pk_live_..." });
+const namoid = createNamoIDClient({ publishableKey: "namoid_auth_pk_live_..." });
+
+const transaction = await namoid.hostedAuth.createPublicTransaction();
 
 namoid.hostedAuth.redirect({
   mode: "sign_in",
@@ -24,6 +26,10 @@ namoid.hostedAuth.redirect({
   codeChallengeMethod: "S256",
 });
 ```
+
+The publishable key identifies its application. The SDK resolves the linked
+Hosted Auth domain and application context automatically; do not copy an
+application ID into your app.
 
 For Next.js apps, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs) so transaction cookies and callback validation are handled for you.
 

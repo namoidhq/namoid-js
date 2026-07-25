@@ -67,7 +67,12 @@ export type NamoIDTokenResponse = {
 export type NamoIDClientOptions = {
   publishableKey: string;
   apiBaseUrl?: string;
-  hostedAuthBaseUrl?: string;
+  fetcher?: typeof fetch;
+};
+
+export type GetNamoIDAuthConfigOptions = {
+  apiKey: string;
+  apiBaseUrl?: string;
   fetcher?: typeof fetch;
 };
 
@@ -113,36 +118,48 @@ export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
   const fetcher = requireFetch(options.fetcher);
   let configPromise: Promise<NamoIDAuthConfig> | null = null;
   const getConfig = () => {
-    configPromise ??= request<NamoIDAuthConfig>({
-      fetcher,
+    configPromise ??= getNamoIDAuthConfig({
+      apiKey: options.publishableKey,
       apiBaseUrl,
-      publishableKey: options.publishableKey,
-      path: "/v1/auth/config",
+      fetcher,
     });
     return configPromise;
   };
-  const getHostedAuthBaseUrl = async () =>
-    normalizeBaseUrl(options.hostedAuthBaseUrl ?? (await getConfig()).hosted_auth_base_url);
-
   return {
     publishableKey: options.publishableKey,
     apiBaseUrl,
     auth: { getConfig },
     hostedAuth: {
-      getUrl: async (urlOptions) => buildHostedAuthUrl(await getHostedAuthBaseUrl(), urlOptions),
+      getUrl: async (urlOptions) => {
+        return buildConfiguredHostedAuthUrl(await getConfig(), urlOptions);
+      },
       redirect: async (urlOptions) => {
         if (typeof window === "undefined") {
           throw new NamoIDError("hostedAuth.redirect can only run in a browser", {
             code: "browser_required",
           });
         }
-        window.location.assign(buildHostedAuthUrl(await getHostedAuthBaseUrl(), urlOptions));
+        window.location.assign(buildConfiguredHostedAuthUrl(await getConfig(), urlOptions));
       },
       createPublicTransaction: createHostedAuthTransaction,
       exchangeCode: (exchangeOptions) =>
         exchangeHostedAuthCode({ ...exchangeOptions, apiBaseUrl, fetcher }),
     },
   };
+}
+
+export async function getNamoIDAuthConfig(
+  options: GetNamoIDAuthConfigOptions,
+): Promise<NamoIDAuthConfig> {
+  if (!options.apiKey) {
+    throw new NamoIDError("apiKey is required", { code: "missing_api_key" });
+  }
+  return request<NamoIDAuthConfig>({
+    fetcher: requireFetch(options.fetcher),
+    apiBaseUrl: normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL),
+    apiKey: options.apiKey,
+    path: "/v1/auth/config",
+  });
 }
 
 export function buildHostedAuthUrl(baseUrl: string, options: HostedAuthUrlOptions): string {
@@ -156,6 +173,33 @@ export function buildHostedAuthUrl(baseUrl: string, options: HostedAuthUrlOption
   if (options.codeChallengeMethod) url.searchParams.set("code_challenge_method", options.codeChallengeMethod);
   for (const [key, value] of Object.entries(options.extraParams ?? {})) {
     if (value !== null && value !== undefined) url.searchParams.set(key, String(value));
+  }
+  return url.toString();
+}
+
+export function buildConfiguredHostedAuthUrl(
+  config: NamoIDAuthConfig,
+  options: HostedAuthUrlOptions,
+): string {
+  const mode = options.mode ?? "sign_in";
+  const configuredPage = config.hosted_auth_pages[mode];
+  if (!configuredPage) {
+    throw new NamoIDError(`Hosted Auth page is not enabled: ${mode}`, {
+      code: "hosted_auth_page_disabled",
+    });
+  }
+  const url = new URL(configuredPage);
+  url.searchParams.set("return_to", options.returnTo);
+  url.searchParams.set("state", options.state);
+  url.searchParams.set("completion_mode", options.completionMode);
+  if (options.codeChallenge) url.searchParams.set("code_challenge", options.codeChallenge);
+  if (options.codeChallengeMethod) {
+    url.searchParams.set("code_challenge_method", options.codeChallengeMethod);
+  }
+  for (const [key, value] of Object.entries(options.extraParams ?? {})) {
+    if (value !== null && value !== undefined && !url.searchParams.has(key)) {
+      url.searchParams.set(key, String(value));
+    }
   }
   return url.toString();
 }
@@ -246,11 +290,11 @@ export async function pkceChallenge(verifier: string): Promise<string> {
 async function request<T>(options: {
   fetcher: typeof fetch;
   apiBaseUrl: string;
-  publishableKey: string;
+  apiKey: string;
   path: string;
 }): Promise<T> {
   const response = await options.fetcher(new URL(options.path, options.apiBaseUrl), {
-    headers: { "X-API-Key": options.publishableKey, accept: "application/json" },
+    headers: { "X-API-Key": options.apiKey, accept: "application/json" },
   });
   if (!response.ok) {
     const body = await safeJson(response);

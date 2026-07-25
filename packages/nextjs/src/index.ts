@@ -1,6 +1,7 @@
 import {
-  buildHostedAuthUrl,
+  buildConfiguredHostedAuthUrl,
   exchangeHostedAuthCode,
+  getNamoIDAuthConfig,
   NamoIDError,
   randomBase64Url,
   revokeNativeSession,
@@ -10,7 +11,6 @@ import {
 import { validateAuthToken } from "@namoidhq/js/server";
 
 export type NamoIDNextOptions = {
-  hostedAuthBaseUrl: string;
   authSecretKey: string;
   appBaseUrl: string;
   apiBaseUrl?: string;
@@ -73,11 +73,9 @@ const DEFAULT_COOKIE_PREFIX = "namoid";
 const DEFAULT_TRANSACTION_MAX_AGE_SECONDS = 10 * 60;
 
 export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextClient {
-  assertRequired(options.hostedAuthBaseUrl, "hostedAuthBaseUrl");
   assertRequired(options.authSecretKey, "authSecretKey");
   assertRequired(options.appBaseUrl, "appBaseUrl");
 
-  const hostedAuthBaseUrl = trimTrailingSlash(options.hostedAuthBaseUrl);
   const apiBaseUrl = trimTrailingSlash(options.apiBaseUrl ?? DEFAULT_API_BASE_URL);
   const appBaseUrl = trimTrailingSlash(options.appBaseUrl);
   const callbackPath = options.callbackPath ?? DEFAULT_CALLBACK_PATH;
@@ -90,6 +88,15 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   if (!fetcher) {
     throw new NamoIDError("fetch is not available; pass a fetcher option", { code: "missing_fetch" });
   }
+  let authConfigPromise: ReturnType<typeof getNamoIDAuthConfig> | null = null;
+  const getHostedAuthContext = async () => {
+    authConfigPromise ??= getNamoIDAuthConfig({
+      apiKey: options.authSecretKey,
+      apiBaseUrl,
+      fetcher,
+    });
+    return authConfigPromise;
+  };
 
   const client: NamoIDNextClient = {
     login: async (loginOptions = {}) => {
@@ -161,8 +168,10 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
       const postLogoutRedirectUri =
         logoutOptions.postLogoutRedirectUri ?? absoluteUrl(appBaseUrl, postLogoutRedirectPath);
       if (logoutOptions.clearHostedSession !== false) {
-        const logoutUrl = new URL("/sign-out", ensureTrailingSlash(hostedAuthBaseUrl));
+        const config = await getHostedAuthContext();
+        const logoutUrl = new URL("/sign-out", ensureTrailingSlash(config.hosted_auth_base_url));
         logoutUrl.searchParams.set("return_to", postLogoutRedirectUri);
+        copyConfiguredPageContext(config.hosted_auth_pages.sign_in, logoutUrl);
         return redirectResponse(logoutUrl.toString());
       }
       return redirectResponse(postLogoutRedirectUri);
@@ -173,12 +182,13 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   };
 
   async function createTransaction(loginOptions: StartLoginOptions = {}) {
+    const config = await getHostedAuthContext();
     const transaction: StoredTransaction = {
       state: randomBase64Url(32),
       returnTo: sanitizeReturnTo(loginOptions.returnTo ?? postLoginRedirectPath),
       createdAt: Date.now(),
     };
-    const hostedAuthUrl = buildHostedAuthUrl(hostedAuthBaseUrl, {
+    const hostedAuthUrl = buildConfiguredHostedAuthUrl(config, {
       mode: loginOptions.mode,
       returnTo: loginOptions.callbackUrl ?? absoluteUrl(appBaseUrl, callbackPath),
       state: transaction.state,
@@ -220,6 +230,14 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   }
 
   return client;
+}
+
+function copyConfiguredPageContext(pageUrl: string | undefined, target: URL): void {
+  if (!pageUrl) return;
+  const source = new URL(pageUrl);
+  for (const [key, value] of source.searchParams) {
+    target.searchParams.set(key, value);
+  }
 }
 
 function writeTransactionCookies(
