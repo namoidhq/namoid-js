@@ -1,6 +1,6 @@
 {
   "name": "@namoidhq/js",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Core JavaScript SDK for NamoID Hosted Auth: auth configuration, hosted sign-in URLs, and native session helpers.",
   "keywords": [
     "namoid",
