@@ -10,9 +10,7 @@ export type NamoIDSignInMethod =
   | string;
 
 export type NamoIDAuthConfig = {
-  project_id: string;
-  environment_id: string;
-  key_prefix: string;
+  client_id: string;
   issuer: string;
   hosted_auth_base_url: string;
   hosted_auth_pages: Partial<Record<"sign_in" | "sign_up" | "waitlist" | "account", string>>;
@@ -53,6 +51,8 @@ export type HostedAuthExchangeOptions = {
   code: string;
   codeVerifier?: string;
   deviceId?: string;
+  clientId?: string;
+  clientSecret?: string;
 };
 
 export type NamoIDTokenResponse = {
@@ -65,20 +65,17 @@ export type NamoIDTokenResponse = {
 };
 
 export type NamoIDClientOptions = {
-  publishableKey: string;
-  apiBaseUrl?: string;
+  clientId: string;
   fetcher?: typeof fetch;
 };
 
 export type GetNamoIDAuthConfigOptions = {
-  apiKey: string;
-  apiBaseUrl?: string;
+  clientId: string;
   fetcher?: typeof fetch;
 };
 
 export type NamoIDClient = {
-  readonly publishableKey: string;
-  readonly apiBaseUrl: string;
+  readonly clientId: string;
   auth: {
     getConfig: () => Promise<NamoIDAuthConfig>;
   };
@@ -110,24 +107,21 @@ export class NamoIDError extends Error {
 const DEFAULT_API_BASE_URL = "https://api.namoid.in";
 
 export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
-  if (!options.publishableKey) {
-    throw new NamoIDError("publishableKey is required", { code: "missing_publishable_key" });
+  if (!options.clientId) {
+    throw new NamoIDError("clientId is required", { code: "missing_client_id" });
   }
 
-  const apiBaseUrl = normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL);
   const fetcher = requireFetch(options.fetcher);
   let configPromise: Promise<NamoIDAuthConfig> | null = null;
   const getConfig = () => {
     configPromise ??= getNamoIDAuthConfig({
-      apiKey: options.publishableKey,
-      apiBaseUrl,
+      clientId: options.clientId,
       fetcher,
     });
     return configPromise;
   };
   return {
-    publishableKey: options.publishableKey,
-    apiBaseUrl,
+    clientId: options.clientId,
     auth: { getConfig },
     hostedAuth: {
       getUrl: async (urlOptions) => {
@@ -143,7 +137,7 @@ export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
       },
       createPublicTransaction: createHostedAuthTransaction,
       exchangeCode: (exchangeOptions) =>
-        exchangeHostedAuthCode({ ...exchangeOptions, apiBaseUrl, fetcher }),
+        exchangeHostedAuthCode({ ...exchangeOptions, clientId: options.clientId, fetcher }),
     },
   };
 }
@@ -151,13 +145,12 @@ export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
 export async function getNamoIDAuthConfig(
   options: GetNamoIDAuthConfigOptions,
 ): Promise<NamoIDAuthConfig> {
-  if (!options.apiKey) {
-    throw new NamoIDError("apiKey is required", { code: "missing_api_key" });
+  if (!options.clientId) {
+    throw new NamoIDError("clientId is required", { code: "missing_client_id" });
   }
   return request<NamoIDAuthConfig>({
     fetcher: requireFetch(options.fetcher),
-    apiBaseUrl: normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL),
-    apiKey: options.apiKey,
+    clientId: options.clientId,
     path: "/v1/auth/config",
   });
 }
@@ -215,26 +208,23 @@ export async function createHostedAuthTransaction(): Promise<HostedAuthTransacti
 }
 
 export async function exchangeHostedAuthCode(
-  options: HostedAuthExchangeOptions & {
-    apiBaseUrl?: string;
-    apiKey?: string;
-    fetcher?: typeof fetch;
-  },
+  options: HostedAuthExchangeOptions & { fetcher?: typeof fetch },
 ): Promise<NamoIDTokenResponse> {
   const fetcher = requireFetch(options.fetcher);
   const response = await fetcher(
-    new URL("/v1/auth/hosted/exchange", normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL)),
+    new URL("/v1/auth/hosted/exchange", DEFAULT_API_BASE_URL),
     {
       method: "POST",
       headers: {
         accept: "application/json",
         "content-type": "application/json",
-        ...(options.apiKey ? { "X-API-Key": options.apiKey } : {}),
       },
       body: JSON.stringify({
         code: options.code,
         code_verifier: options.codeVerifier,
         device_id: options.deviceId,
+        client_id: options.clientId,
+        client_secret: options.clientSecret,
       }),
       cache: "no-store",
     },
@@ -253,12 +243,11 @@ export async function exchangeHostedAuthCode(
 export async function revokeNativeSession(options: {
   accessToken: string;
   refreshToken?: string;
-  apiBaseUrl?: string;
   fetcher?: typeof fetch;
 }): Promise<void> {
   const fetcher = requireFetch(options.fetcher);
   const response = await fetcher(
-    new URL("/v1/auth/logout", normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL)),
+    new URL("/v1/auth/logout", DEFAULT_API_BASE_URL),
     {
       method: "POST",
       headers: { authorization: `Bearer ${options.accessToken}`, "content-type": "application/json" },
@@ -289,12 +278,13 @@ export async function pkceChallenge(verifier: string): Promise<string> {
 
 async function request<T>(options: {
   fetcher: typeof fetch;
-  apiBaseUrl: string;
-  apiKey: string;
+  clientId: string;
   path: string;
 }): Promise<T> {
-  const response = await options.fetcher(new URL(options.path, options.apiBaseUrl), {
-    headers: { "X-API-Key": options.apiKey, accept: "application/json" },
+  const url = new URL(options.path, DEFAULT_API_BASE_URL);
+  url.searchParams.set("client_id", options.clientId);
+  const response = await options.fetcher(url, {
+    headers: { accept: "application/json" },
   });
   if (!response.ok) {
     const body = await safeJson(response);

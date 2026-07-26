@@ -11,7 +11,7 @@ import { NamoIDProvider, SignIn } from "@namoidhq/react";
 
 export function App() {
   return (
-    <NamoIDProvider publishableKey="namoid_auth_pk_live_...">
+    <NamoIDProvider clientId="namoid_client_live_...">
       <SignIn returnTo="https://your-app.com/auth/callback" />
     </NamoIDProvider>
   );

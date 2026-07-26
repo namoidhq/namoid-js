@@ -10,13 +10,12 @@ It implements the secure NamoID Hosted Auth plumbing your app should not hand-ro
 - native session exchange and access-token validation
 - app-specific success hooks for your own session cookie
 
-Hosted Auth is the complete integration surface for this package. Browser code
-uses a publishable key; server-side callback handling uses the environment auth
-secret key.
+Hosted Auth is the complete integration surface for this package. Server-side
+callback handling uses an application Client ID and Client Secret.
 
-The auth secret key identifies the application. The SDK reads its browser-safe
-configuration and resolves the correct Hosted Auth domain automatically. An
-application ID and Hosted Auth URL are not required.
+The SDK reads browser-safe configuration using the Client ID and resolves the
+correct Hosted Auth domain automatically. An internal application UUID and API
+base URL are not required.
 
 ```bash
 npm i @namoidhq/nextjs @namoidhq/js
@@ -30,7 +29,8 @@ npm i @namoidhq/nextjs @namoidhq/js
 import { createNamoIDNextClient } from "@namoidhq/nextjs";
 
 const namoid = createNamoIDNextClient({
-  authSecretKey: process.env.NAMOID_AUTH_SECRET_KEY!,
+  clientId: process.env.NAMOID_CLIENT_ID!,
+  clientSecret: process.env.NAMOID_CLIENT_SECRET!,
   appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
   callbackPath: "/api/auth/callback/namoid",
   postLoginRedirectPath: "/dashboard",
@@ -45,7 +45,8 @@ export const GET = () => namoid.login();
 import { createNamoIDNextClient } from "@namoidhq/nextjs";
 
 const namoid = createNamoIDNextClient({
-  authSecretKey: process.env.NAMOID_AUTH_SECRET_KEY!,
+  clientId: process.env.NAMOID_CLIENT_ID!,
+  clientSecret: process.env.NAMOID_CLIENT_SECRET!,
   appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
   callbackPath: "/api/auth/callback/namoid",
   postLoginRedirectPath: "/dashboard",
