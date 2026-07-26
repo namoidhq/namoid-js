@@ -27,13 +27,12 @@ const NamoIDContext = createContext<NamoIDClient | null>(null);
 
 export function NamoIDProvider({
   children,
-  publishableKey,
-  apiBaseUrl,
+  clientId,
   fetcher,
 }: NamoIDProviderProps) {
   const client = useMemo(
-    () => createNamoIDClient({ publishableKey, apiBaseUrl, fetcher }),
-    [publishableKey, apiBaseUrl, fetcher],
+    () => createNamoIDClient({ clientId, fetcher }),
+    [clientId, fetcher],
   );
 
   return <NamoIDContext.Provider value={client}>{children}</NamoIDContext.Provider>;
@@ -107,7 +106,7 @@ export function HostedAuthButton({
     try {
       const transaction = await client.hostedAuth.createPublicTransaction();
       sessionStorage.setItem(
-        transactionStorageKey(client.publishableKey),
+        transactionStorageKey(client.clientId),
         JSON.stringify(transaction),
       );
       await client.hostedAuth.redirect({
@@ -312,7 +311,7 @@ export async function completeHostedAuthRedirect(
   const url = new URL(callbackUrl);
   const code = url.searchParams.get("code");
   const returnedState = url.searchParams.get("state");
-  const storageKey = transactionStorageKey(client.publishableKey);
+  const storageKey = transactionStorageKey(client.clientId);
   const raw = sessionStorage.getItem(storageKey);
   if (!code || !returnedState || !raw) {
     throw new Error("Hosted Auth callback is missing its transaction");
@@ -325,8 +324,8 @@ export async function completeHostedAuthRedirect(
   return client.hostedAuth.exchangeCode({ code, codeVerifier: transaction.codeVerifier });
 }
 
-function transactionStorageKey(publishableKey: string): string {
-  return `namoid_hosted_auth:${publishableKey.slice(-12)}`;
+function transactionStorageKey(clientId: string): string {
+  return `namoid_hosted_auth:${clientId.slice(-12)}`;
 }
 
 const styles: Record<string, CSSProperties> = {

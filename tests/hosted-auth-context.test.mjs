@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createNamoIDClient } from "../packages/js/dist/index.js";
+import {
+  createNamoIDClient,
+  exchangeHostedAuthCode,
+} from "../packages/js/dist/index.js";
 import { createNamoIDNextClient } from "../packages/nextjs/dist/index.js";
 
 const config = {
-  project_id: "project-id",
-  environment_id: "environment-id",
-  key_prefix: "namoid_auth_pk_test",
+  client_id: "namoid_client_test_configured",
   issuer: "https://tenant.sandbox.namoid.in",
   hosted_auth_base_url: "https://tenant.sandbox.namoid.in",
   hosted_auth_pages: {
     sign_in:
-      "https://tenant.sandbox.namoid.in/sign-in?application_id=application-id",
+      "https://tenant.sandbox.namoid.in/sign-in?client_id=namoid_client_test_configured",
   },
   access_mode: "open",
   waitlist_enabled: false,
@@ -31,13 +32,14 @@ const config = {
 function configFetcher(request, init = {}) {
   const url = new URL(request);
   assert.equal(url.pathname, "/v1/auth/config");
-  assert.equal(init.headers["X-API-Key"], "configured-key");
+  assert.equal(url.searchParams.get("client_id"), "namoid_client_test_configured");
+  assert.equal(init.headers["X-API-Key"], undefined);
   return Promise.resolve(Response.json(config));
 }
 
-test("browser client uses the key-resolved Hosted Auth entry point", async () => {
+test("browser client uses the Client ID-resolved Hosted Auth entry point", async () => {
   const client = createNamoIDClient({
-    publishableKey: "configured-key",
+    clientId: "namoid_client_test_configured",
     fetcher: configFetcher,
   });
 
@@ -46,40 +48,63 @@ test("browser client uses the key-resolved Hosted Auth entry point", async () =>
       returnTo: "https://app.example.com/callback",
       state: "state",
       completionMode: "public",
-      extraParams: { application_id: "caller-supplied-id" },
+      extraParams: { client_id: "caller-supplied-id" },
     }),
   );
 
   assert.equal(url.origin, "https://tenant.sandbox.namoid.in");
   assert.equal(url.pathname, "/sign-in");
-  assert.equal(url.searchParams.get("application_id"), "application-id");
+  assert.equal(url.searchParams.get("client_id"), "namoid_client_test_configured");
 });
 
-test("Next.js client uses the secret-key-resolved Hosted Auth entry point", async () => {
+test("Next.js client uses the Client ID-resolved Hosted Auth entry point", async () => {
   const client = createNamoIDNextClient({
-    authSecretKey: "configured-key",
+    clientId: "namoid_client_test_configured",
+    clientSecret: "namoid_secret_test_configured",
     appBaseUrl: "https://app.example.com",
     fetcher: configFetcher,
   });
 
   const { hostedAuthUrl } = await client.createTransaction({
     returnTo: "/dashboard",
-    extraParams: { application_id: "caller-supplied-id" },
+    extraParams: { client_id: "caller-supplied-id" },
   });
   const url = new URL(hostedAuthUrl);
 
   assert.equal(url.origin, "https://tenant.sandbox.namoid.in");
   assert.equal(url.pathname, "/sign-in");
-  assert.equal(url.searchParams.get("application_id"), "application-id");
+  assert.equal(url.searchParams.get("client_id"), "namoid_client_test_configured");
   assert.equal(
     url.searchParams.get("return_to"),
     "https://app.example.com/api/auth/callback/namoid",
   );
 });
 
-test("Next.js logout preserves the opaque application routing context", async () => {
+test("confidential exchange sends application credentials in the request body", async () => {
+  const tokens = await exchangeHostedAuthCode({
+    code: "hosted-code",
+    clientId: "namoid_client_test_configured",
+    clientSecret: "namoid_secret_test_configured",
+    fetcher: async (request, init) => {
+      const url = new URL(request);
+      assert.equal(url.origin, "https://api.namoid.in");
+      assert.equal(url.pathname, "/v1/auth/hosted/exchange");
+      assert.equal(init.headers["X-API-Key"], undefined);
+      assert.deepEqual(JSON.parse(init.body), {
+        code: "hosted-code",
+        client_id: "namoid_client_test_configured",
+        client_secret: "namoid_secret_test_configured",
+      });
+      return Response.json({ access_token: "access", token_type: "Bearer" });
+    },
+  });
+  assert.equal(tokens.access_token, "access");
+});
+
+test("Next.js logout preserves the Client ID routing context", async () => {
   const client = createNamoIDNextClient({
-    authSecretKey: "configured-key",
+    clientId: "namoid_client_test_configured",
+    clientSecret: "namoid_secret_test_configured",
     appBaseUrl: "https://app.example.com",
     fetcher: configFetcher,
   });
@@ -89,6 +114,6 @@ test("Next.js logout preserves the opaque application routing context", async ()
 
   assert.equal(url.origin, "https://tenant.sandbox.namoid.in");
   assert.equal(url.pathname, "/sign-out");
-  assert.equal(url.searchParams.get("application_id"), "application-id");
+  assert.equal(url.searchParams.get("client_id"), "namoid_client_test_configured");
   assert.equal(url.searchParams.get("return_to"), "https://app.example.com/login");
 });

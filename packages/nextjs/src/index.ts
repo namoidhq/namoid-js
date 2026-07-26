@@ -11,9 +11,9 @@ import {
 import { validateAuthToken } from "@namoidhq/js/server";
 
 export type NamoIDNextOptions = {
-  authSecretKey: string;
+  clientId: string;
+  clientSecret: string;
   appBaseUrl: string;
-  apiBaseUrl?: string;
   callbackPath?: string;
   postLoginRedirectPath?: string;
   postLogoutRedirectPath?: string;
@@ -65,7 +65,6 @@ export type NamoIDNextClient = {
   clearTransactionCookies: (headers: Headers) => void;
 };
 
-const DEFAULT_API_BASE_URL = "https://api.namoid.in";
 const DEFAULT_CALLBACK_PATH = "/api/auth/callback/namoid";
 const DEFAULT_POST_LOGIN_REDIRECT_PATH = "/";
 const DEFAULT_POST_LOGOUT_REDIRECT_PATH = "/login";
@@ -73,10 +72,10 @@ const DEFAULT_COOKIE_PREFIX = "namoid";
 const DEFAULT_TRANSACTION_MAX_AGE_SECONDS = 10 * 60;
 
 export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextClient {
-  assertRequired(options.authSecretKey, "authSecretKey");
+  assertRequired(options.clientId, "clientId");
+  assertRequired(options.clientSecret, "clientSecret");
   assertRequired(options.appBaseUrl, "appBaseUrl");
 
-  const apiBaseUrl = trimTrailingSlash(options.apiBaseUrl ?? DEFAULT_API_BASE_URL);
   const appBaseUrl = trimTrailingSlash(options.appBaseUrl);
   const callbackPath = options.callbackPath ?? DEFAULT_CALLBACK_PATH;
   const postLoginRedirectPath = options.postLoginRedirectPath ?? DEFAULT_POST_LOGIN_REDIRECT_PATH;
@@ -91,8 +90,7 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   let authConfigPromise: ReturnType<typeof getNamoIDAuthConfig> | null = null;
   const getHostedAuthContext = async () => {
     authConfigPromise ??= getNamoIDAuthConfig({
-      apiKey: options.authSecretKey,
-      apiBaseUrl,
+      clientId: options.clientId,
       fetcher,
     });
     return authConfigPromise;
@@ -128,14 +126,14 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
 
         const tokens = await exchangeHostedAuthCode({
           code,
-          apiBaseUrl,
-          apiKey: options.authSecretKey,
+          clientId: options.clientId,
+          clientSecret: options.clientSecret,
           fetcher,
         });
         const validation = await validateAuthToken({
           token: tokens.access_token,
-          apiBaseUrl,
-          apiKey: options.authSecretKey,
+          clientId: options.clientId,
+          clientSecret: options.clientSecret,
           fetcher,
         });
         if (!validation.valid) {
@@ -161,7 +159,6 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
         await revokeNativeSession({
           accessToken: logoutOptions.accessToken,
           refreshToken: logoutOptions.refreshToken,
-          apiBaseUrl,
           fetcher,
         });
       }

@@ -13,7 +13,7 @@ npm i @namoidhq/js
 ```js
 import { createNamoIDClient } from "@namoidhq/js";
 
-const namoid = createNamoIDClient({ publishableKey: "namoid_auth_pk_live_..." });
+const namoid = createNamoIDClient({ clientId: "namoid_client_live_..." });
 
 const transaction = await namoid.hostedAuth.createPublicTransaction();
 
@@ -27,9 +27,9 @@ namoid.hostedAuth.redirect({
 });
 ```
 
-The publishable key identifies its application. The SDK resolves the linked
+The Client ID identifies its application. The SDK resolves the linked
 Hosted Auth domain and application context automatically; do not copy an
-application ID into your app.
+internal application UUID or API base URL into your app.
 
 For Next.js apps, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs) so transaction cookies and callback validation are handled for you.
 
@@ -40,11 +40,12 @@ import { validateAuthToken } from "@namoidhq/js/server";
 
 const result = await validateAuthToken({
   token: accessToken,
-  apiKey: process.env.NAMOID_AUTH_SECRET_KEY!,
+  clientId: process.env.NAMOID_CLIENT_ID!,
+  clientSecret: process.env.NAMOID_CLIENT_SECRET!,
 });
 ```
 
-Never expose the auth secret key or this server-only helper in browser code.
+Never expose the Client Secret or this server-only helper in browser code.
 
 Docs: <https://namoid.in> · Contact: hello@namoid.in
 

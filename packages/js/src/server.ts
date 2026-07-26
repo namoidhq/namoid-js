@@ -13,8 +13,8 @@ const DEFAULT_API_BASE_URL = "https://api.namoid.in";
 
 export async function validateAuthToken(options: {
   token: string;
-  apiKey: string;
-  apiBaseUrl?: string;
+  clientId: string;
+  clientSecret: string;
   fetcher?: typeof fetch;
 }): Promise<AuthTokenValidation> {
   const fetcher = options.fetcher ?? globalThis.fetch;
@@ -23,15 +23,18 @@ export async function validateAuthToken(options: {
   }
 
   const response = await fetcher(
-    new URL("/v1/auth/tokens/validate", normalizeBaseUrl(options.apiBaseUrl ?? DEFAULT_API_BASE_URL)),
+    new URL("/v1/auth/tokens/validate", DEFAULT_API_BASE_URL),
     {
       method: "POST",
       headers: {
         accept: "application/json",
         "content-type": "application/json",
-        "X-API-Key": options.apiKey,
       },
-      body: JSON.stringify({ token: options.token }),
+      body: JSON.stringify({
+        token: options.token,
+        client_id: options.clientId,
+        client_secret: options.clientSecret,
+      }),
       cache: "no-store",
     },
   );
@@ -46,10 +49,6 @@ export async function validateAuthToken(options: {
   }
 
   return (await response.json()) as AuthTokenValidation;
-}
-
-function normalizeBaseUrl(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
 }
 
 async function safeJson(response: Response): Promise<unknown> {
