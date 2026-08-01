@@ -144,14 +144,12 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
         const success = callbackOptions.onSuccess
           ? await callbackOptions.onSuccess({ request, tokens, transaction })
           : redirectResponse(absoluteUrl(appBaseUrl, transaction.returnTo));
-        clearTransactionCookies(success.headers);
-        return success;
+        return withClearedTransactionCookies(success);
       } catch (error) {
         const fallback = callbackOptions.onError
           ? await callbackOptions.onError(error, request)
           : redirectResponse(withQuery(absoluteUrl(appBaseUrl, postLogoutRedirectPath), "error", errorCode(error)));
-        clearTransactionCookies(fallback.headers);
-        return fallback;
+        return withClearedTransactionCookies(fallback);
       }
     },
     logout: async (logoutOptions = {}) => {
@@ -224,6 +222,19 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
         maxAge: 0,
       });
     }
+  }
+
+  function withClearedTransactionCookies(response: Response): Response {
+    // Response.redirect() and framework-created responses may expose guarded,
+    // immutable Headers. Clone the response before appending cookie cleanup so
+    // callback handlers can safely return any standards-compliant Response.
+    const mutableResponse = new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: new Headers(response.headers),
+    });
+    clearTransactionCookies(mutableResponse.headers);
+    return mutableResponse;
   }
 
   return client;

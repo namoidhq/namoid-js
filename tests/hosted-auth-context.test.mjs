@@ -117,3 +117,47 @@ test("Next.js logout preserves the Client ID routing context", async () => {
   assert.equal(url.searchParams.get("client_id"), "namoid_client_test_configured");
   assert.equal(url.searchParams.get("return_to"), "https://app.example.com/login");
 });
+
+test("Next.js callback accepts a Response.redirect result with immutable headers", async () => {
+  const fetcher = async (request) => {
+    const url = new URL(request);
+    if (url.pathname === "/v1/auth/hosted/exchange") {
+      return Response.json({ access_token: "access", token_type: "Bearer", expires_in: 600 });
+    }
+    if (url.pathname === "/v1/auth/tokens/validate") {
+      return Response.json({
+        valid: true,
+        user_id: "user-1",
+        session_id: "session-1",
+        client_id: "namoid_client_test_configured",
+        scopes: [],
+        error: null,
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const client = createNamoIDNextClient({
+    clientId: "namoid_client_test_configured",
+    clientSecret: "namoid_secret_test_configured",
+    appBaseUrl: "https://app.example.com",
+    fetcher,
+  });
+  const createdAt = Date.now();
+  const request = new Request(
+    "https://app.example.com/api/auth/callback/namoid?code=hosted-code&state=state",
+    {
+      headers: {
+        cookie: `namoid_state=state; namoid_return_to=%2Fdashboard; namoid_created_at=${createdAt}`,
+      },
+    },
+  );
+
+  const response = await client.callback(request, {
+    onSuccess: () => Response.redirect("https://app.example.com/dashboard"),
+  });
+
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("location"), "https://app.example.com/dashboard");
+  assert.match(response.headers.get("set-cookie"), /namoid_state=; Max-Age=0/);
+  assert.doesNotMatch(response.headers.get("location"), /error=immutable/);
+});
