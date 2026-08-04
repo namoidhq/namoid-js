@@ -1,0 +1,59 @@
+{
+  "name": "@namoidhq/mcp",
+  "version": "0.1.0",
+  "description": "Protect an MCP server with NamoID: RFC 9728 protected-resource metadata, audience-bound token verification, and per-tool scope enforcement.",
+  "keywords": [
+    "namoid",
+    "mcp",
+    "model-context-protocol",
+    "oauth",
+    "oauth2",
+    "authorization",
+    "resource-server",
+    "jwt",
+    "jwks",
+    "identity",
+    "india"
+  ],
+  "homepage": "https://namoid.in",
+  "bugs": {
+    "url": "https://github.com/namoidhq/namoid-js/issues",
+    "email": "hello@namoid.in"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/namoidhq/namoid-js.git",
+    "directory": "packages/mcp"
+  },
+  "license": "MIT",
+  "author": "PolyMindsLabs Pvt. Ltd. <hello@namoid.in> (https://namoid.in)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "jose": "^6.2.8"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "typescript": "^6.0.3"
+  }
+}
