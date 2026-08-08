@@ -12,6 +12,7 @@ on:
           - js
           - react
           - nextjs
+          - mcp
 
 concurrency:
   group: publish-npm
@@ -63,6 +64,13 @@ jobs:
       - name: Stage @namoidhq/nextjs
         if: ${{ inputs.package == 'all' || inputs.package == 'nextjs' }}
         working-directory: packages/nextjs
+        run: |
+          pnpm pack
+          npm stage publish *.tgz
+
+      - name: Stage @namoidhq/mcp
+        if: ${{ inputs.package == 'all' || inputs.package == 'mcp' }}
+        working-directory: packages/mcp
         run: |
           pnpm pack
           npm stage publish *.tgz

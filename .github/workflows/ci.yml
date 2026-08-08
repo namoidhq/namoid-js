@@ -29,3 +29,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm -r typecheck
+
+      - name: Test
+        run: node --test tests/*.test.mjs
