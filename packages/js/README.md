@@ -1,53 +1,57 @@
 # @namoidhq/js
 
-Core JavaScript SDK for **NamoID Hosted Auth**.
-
-Use it to fetch auth config, build Hosted Auth URLs, create public PKCE transactions, exchange hosted codes, and revoke native sessions.
+Core JavaScript SDK for **NamoID Hosted Auth** using OpenID Connect Authorization Code with PKCE.
 
 ```bash
 npm i @namoidhq/js
 ```
 
-## Browser hosted login
-
-```js
-import { createNamoIDClient } from "@namoidhq/js";
-
-const namoid = createNamoIDClient({ clientId: "namoid_client_live_..." });
-
-const transaction = await namoid.hostedAuth.createPublicTransaction();
-
-namoid.hostedAuth.redirect({
-  mode: "sign_in",
-  returnTo: "https://your-app.com/callback",
-  state: transaction.state,
-  completionMode: "public",
-  codeChallenge: transaction.codeChallenge,
-  codeChallengeMethod: "S256",
-});
-```
-
-The Client ID identifies its application. The SDK resolves the linked
-Hosted Auth domain and application context automatically; do not copy an
-internal application UUID or API base URL into your app.
-
-For Next.js apps, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs) so transaction cookies and callback validation are handled for you.
-
-Server-side token validation is available from the server-only subpath:
+## Start hosted sign-in
 
 ```ts
-import { validateAuthToken } from "@namoidhq/js/server";
+import { createNamoIDClient } from "@namoidhq/js";
 
-const result = await validateAuthToken({
-  token: accessToken,
-  clientId: process.env.NAMOID_CLIENT_ID!,
-  clientSecret: process.env.NAMOID_CLIENT_SECRET!,
+const namoid = createNamoIDClient({
+  clientId: "namoid_client_live_...",
 });
+
+const started = await namoid.hostedAuth.start({
+  redirectUri: "https://your-app.com/auth/callback",
+  scopes: ["openid", "email"],
+});
+
+// Retain this one-time transaction until the callback. Do not store tokens here.
+sessionStorage.setItem("namoid_transaction", JSON.stringify(started.transaction));
+window.location.assign(started.authorizationUrl);
 ```
 
-Never expose the Client Secret or this server-only helper in browser code.
+The Client ID resolves the correct issuer and Hosted Auth domain. The SDK then uses issuer discovery instead of hard-coded OAuth endpoints.
 
-Docs: <https://namoid.in> · Contact: hello@namoid.in
+## Complete a public-client callback
+
+```ts
+const transaction = JSON.parse(sessionStorage.getItem("namoid_transaction")!);
+const callback = new URL(window.location.href);
+
+if (callback.searchParams.get("state") !== transaction.state) {
+  throw new Error("Invalid authorization state");
+}
+
+const tokens = await namoid.hostedAuth.exchangeCode({
+  code: callback.searchParams.get("code")!,
+  redirectUri: transaction.redirectUri,
+  codeVerifier: transaction.codeVerifier,
+});
+
+const identity = await namoid.hostedAuth.userInfo(tokens.access_token);
+sessionStorage.removeItem("namoid_transaction");
+```
+
+For browser apps, prefer [`@namoidhq/react`](https://www.npmjs.com/package/@namoidhq/react), which validates state, response issuer, the signed ID token, nonce, and the UserInfo subject. Do not persist bearer or refresh tokens in `localStorage` or `sessionStorage`.
+
+For confidential Next.js apps, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs) so the Client Secret, PKCE verifier, callback validation, refresh token, and application session remain server-side.
+
+Docs: <https://docs.namoid.in> · Contact: hello@namoid.in
 
 ## License
 

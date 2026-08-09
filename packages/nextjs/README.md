@@ -1,61 +1,56 @@
 # @namoidhq/nextjs
 
-Next.js route-handler SDK for **NamoID** hosted login.
+Next.js route-handler SDK for **NamoID Hosted Auth**.
 
-It implements the secure NamoID Hosted Auth plumbing your app should not hand-roll:
+It hides the OpenID Connect plumbing your app should not hand-roll:
 
-- one-time hosted-code flow with PKCE
-- `state` transaction cookies
-- callback validation
-- native session exchange and access-token validation
-- app-specific success hooks for your own session cookie
-
-Hosted Auth is the complete integration surface for this package. Server-side
-callback handling uses an application Client ID and Client Secret.
-
-The SDK reads browser-safe configuration using the Client ID and resolves the
-correct Hosted Auth domain automatically. An internal application UUID and API
-base URL are not required.
+- issuer discovery and exact authorization endpoints
+- Authorization Code with PKCE S256, state, and nonce
+- HttpOnly, SameSite transaction cookies
+- confidential code and refresh-token exchange
+- authorization-response issuer and signed ID-token validation
+- online UserInfo/session validation
+- RFC 7009 grant revocation and RP-initiated logout
 
 ```bash
 npm i @namoidhq/nextjs @namoidhq/js
 ```
 
-## App Router example
-
-`app/api/auth/login/route.ts`
+## Configure once
 
 ```ts
 import { createNamoIDNextClient } from "@namoidhq/nextjs";
 
-const namoid = createNamoIDNextClient({
+export const namoid = createNamoIDNextClient({
   clientId: process.env.NAMOID_CLIENT_ID!,
   clientSecret: process.env.NAMOID_CLIENT_SECRET!,
   appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
   callbackPath: "/api/auth/callback/namoid",
   postLoginRedirectPath: "/dashboard",
+  postLogoutRedirectPath: "/login",
 });
+```
+
+The callback URL must exactly match the URL registered in the NamoID Console.
+
+## Login route
+
+```ts
+import { namoid } from "@/lib/namoid";
 
 export const GET = () => namoid.login();
 ```
 
-`app/api/auth/callback/namoid/route.ts`
+## Callback route
 
 ```ts
-import { createNamoIDNextClient } from "@namoidhq/nextjs";
-
-const namoid = createNamoIDNextClient({
-  clientId: process.env.NAMOID_CLIENT_ID!,
-  clientSecret: process.env.NAMOID_CLIENT_SECRET!,
-  appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
-  callbackPath: "/api/auth/callback/namoid",
-  postLoginRedirectPath: "/dashboard",
-});
+import { namoid } from "@/lib/namoid";
 
 export const GET = (request: Request) =>
   namoid.callback(request, {
-    async onSuccess({ tokens }) {
-      // Create your own HttpOnly app session here.
+    async onSuccess({ tokens, identity }) {
+      // Create your own opaque, HttpOnly application session here.
+      // Keep tokens server-side; do not place them in browser storage.
       return new Response(null, {
         status: 302,
         headers: { location: "/dashboard" },
@@ -64,8 +59,22 @@ export const GET = (request: Request) =>
   });
 ```
 
+The default scopes are `openid email offline_access`. A refresh token is returned only when the issuer grants `offline_access`; store it only in a protected server-side session.
 
-Docs: <https://namoid.in> · Contact: hello@namoid.in
+## Refresh and logout
+
+```ts
+const rotated = await namoid.refresh(serverSession.refreshToken);
+
+return namoid.logout({
+  refreshToken: serverSession.refreshToken,
+  idTokenHint: serverSession.idToken,
+});
+```
+
+Revocation ends the application grant. Supplying the retained ID-token hint additionally clears the NamoID browser SSO session and permits the registered post-logout redirect.
+
+Docs: <https://docs.namoid.in> · Contact: hello@namoid.in
 
 ## License
 

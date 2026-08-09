@@ -5,15 +5,15 @@
 [![@namoidhq/nextjs](https://img.shields.io/npm/v/@namoidhq/nextjs.svg?label=%40namoidhq%2Fnextjs)](https://www.npmjs.com/package/@namoidhq/nextjs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-The JavaScript/TypeScript SDKs for [NamoID](https://namoid.in) Hosted Auth. A pnpm monorepo; every JS/TS package lives here.
+The JavaScript/TypeScript SDKs for [NamoID](https://namoid.in) Hosted Auth. The SDKs use OpenID Connect Authorization Code with PKCE while keeping discovery, state, nonce, token exchange, refresh, and logout mechanics behind framework-friendly APIs.
 
 ## Packages
 
 | Package | npm | What it is |
 |---|---|---|
-| [`@namoidhq/js`](./packages/js) | `@namoidhq/js` | Core SDK — Hosted Auth URLs, auth config, PKCE transactions, token exchange, and native session helpers |
-| [`@namoidhq/react`](./packages/react) | `@namoidhq/react` | React provider, hooks, and hosted sign-in / sign-up / waitlist components |
-| [`@namoidhq/nextjs`](./packages/nextjs) | `@namoidhq/nextjs` | Next.js route-handler adapter — PKCE redirects, callback handling, and secure transaction cookies |
+| [`@namoidhq/js`](./packages/js) | `@namoidhq/js` | Core SDK — configuration, discovery, PKCE authorization, code/refresh exchange, UserInfo, revocation, and logout |
+| [`@namoidhq/react`](./packages/react) | `@namoidhq/react` | React provider, sign-in component, and public-client callback validation |
+| [`@namoidhq/nextjs`](./packages/nextjs) | `@namoidhq/nextjs` | Confidential BFF adapter — secure transaction cookies, callback validation, refresh, revocation, and RP logout |
 
 Future framework adapters (`@namoidhq/vue`, `@namoidhq/svelte`, …) go in this same repo under `packages/`.
 
@@ -35,6 +35,7 @@ Requires [pnpm](https://pnpm.io).
 pnpm install        # links the workspace packages
 pnpm build          # builds every package (tsc), in dependency order
 pnpm typecheck
+pnpm test
 ```
 
 `@namoidhq/react` and `@namoidhq/nextjs` depend on `@namoidhq/js` via `workspace:^`, so changes to the core SDK are picked up locally with no republish.
