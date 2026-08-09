@@ -1,7 +1,7 @@
 {
   "name": "@namoidhq/nextjs",
-  "version": "2.0.1",
-  "description": "Next.js SDK for NamoID hosted login: PKCE redirects, callback handling, and secure route-handler primitives.",
+  "version": "3.0.0",
+  "description": "Next.js SDK for NamoID Hosted Auth using OIDC Authorization Code with PKCE, secure callbacks, refresh, and logout.",
   "keywords": [
     "namoid",
     "nextjs",

@@ -2,16 +2,18 @@
 
 import {
   createNamoIDClient,
-  type HostedAuthMode,
+  NamoIDError,
   type NamoIDAuthConfig,
   type NamoIDClient,
   type NamoIDClientOptions,
   type NamoIDTokenResponse,
+  type NamoIDUserInfo,
+  type OIDCTransaction,
 } from "@namoidhq/js";
+import { validateOIDCIdToken, type ValidatedIDToken } from "@namoidhq/js/server";
 import {
   createContext,
   type CSSProperties,
-  type FormEvent,
   type ReactNode,
   useContext,
   useEffect,
@@ -19,30 +21,21 @@ import {
   useState,
 } from "react";
 
-export type NamoIDProviderProps = NamoIDClientOptions & {
-  children: ReactNode;
-};
+export type NamoIDProviderProps = NamoIDClientOptions & { children: ReactNode };
 
 const NamoIDContext = createContext<NamoIDClient | null>(null);
 
-export function NamoIDProvider({
-  children,
-  clientId,
-  fetcher,
-}: NamoIDProviderProps) {
+export function NamoIDProvider({ children, clientId, fetcher }: NamoIDProviderProps) {
   const client = useMemo(
     () => createNamoIDClient({ clientId, fetcher }),
     [clientId, fetcher],
   );
-
   return <NamoIDContext.Provider value={client}>{children}</NamoIDContext.Provider>;
 }
 
 export function useNamoID(): NamoIDClient {
   const client = useContext(NamoIDContext);
-  if (!client) {
-    throw new Error("useNamoID must be used inside <NamoIDProvider>");
-  }
+  if (!client) throw new Error("useNamoID must be used inside <NamoIDProvider>");
   return client;
 }
 
@@ -58,32 +51,28 @@ export function useAuthConfig(): UseAuthConfigState {
   const [config, setConfig] = useState<NamoIDAuthConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-
   const reload = useMemo(
     () => async () => {
       setLoading(true);
       setError(null);
       try {
         setConfig(await client.auth.getConfig());
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error("Failed to load NamoID config"));
+      } catch (value) {
+        setError(value instanceof Error ? value : new Error("Failed to load NamoID config"));
       } finally {
         setLoading(false);
       }
     },
     [client],
   );
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
+  useEffect(() => void reload(), [reload]);
   return { config, loading, error, reload };
 }
 
 export type HostedAuthButtonProps = {
-  mode?: HostedAuthMode;
-  returnTo: string;
+  redirectUri: string;
+  scopes?: string[];
+  prompt?: "login";
   children?: ReactNode;
   className?: string;
   style?: CSSProperties;
@@ -91,8 +80,9 @@ export type HostedAuthButtonProps = {
 };
 
 export function HostedAuthButton({
-  mode = "sign_in",
-  returnTo,
+  redirectUri,
+  scopes,
+  prompt,
   children,
   className,
   style,
@@ -100,44 +90,33 @@ export function HostedAuthButton({
 }: HostedAuthButtonProps) {
   const client = useNamoID();
   const [starting, setStarting] = useState(false);
-
   const start = async () => {
     setStarting(true);
     try {
-      const transaction = await client.hostedAuth.createPublicTransaction();
+      const started = await client.hostedAuth.start({ redirectUri, scopes, prompt });
       sessionStorage.setItem(
         transactionStorageKey(client.clientId),
-        JSON.stringify(transaction),
+        JSON.stringify(started.transaction),
       );
-      await client.hostedAuth.redirect({
-        mode,
-        returnTo,
-        state: transaction.state,
-        completionMode: "public",
-        codeChallenge: transaction.codeChallenge,
-        codeChallengeMethod: transaction.codeChallengeMethod,
-      });
+      window.location.assign(started.authorizationUrl);
     } finally {
       setStarting(false);
     }
   };
-
   return (
     <button
       type="button"
       className={className}
       style={{ ...styles.button, ...style }}
-      disabled={disabled || starting || !returnTo}
+      disabled={disabled || starting || !redirectUri}
       onClick={() => void start()}
     >
-      {children ?? labelForMode(mode)}
+      {children ?? (starting ? "Opening sign-in…" : "Sign in")}
     </button>
   );
 }
 
-export type AuthFlowProps = {
-  returnTo: string;
-  className?: string;
+export type SignInProps = HostedAuthButtonProps & {
   title?: string;
   description?: string;
   buttonLabel?: string;
@@ -145,187 +124,114 @@ export type AuthFlowProps = {
   unavailableLabel?: string;
 };
 
-export function SignIn(props: AuthFlowProps) {
-  return (
-    <AuthPanel
-      {...props}
-      mode="sign_in"
-      title={props.title ?? "Sign in"}
-      description={props.description ?? "Continue with the sign-in methods enabled for this app."}
-      buttonLabel={props.buttonLabel ?? "Sign in with NamoID"}
-      enabled={(config) => config.signin_methods.length > 0}
-    />
-  );
-}
-
-export function SignUp(props: AuthFlowProps) {
-  return (
-    <AuthPanel
-      {...props}
-      mode="sign_up"
-      title={props.title ?? "Create account"}
-      description={props.description ?? "Start the hosted signup flow for this app."}
-      buttonLabel={props.buttonLabel ?? "Sign up with NamoID"}
-      unavailableLabel={props.unavailableLabel ?? "Signups are currently paused."}
-      enabled={(config) => config.access_mode !== "closed"}
-    />
-  );
-}
-
-export type WaitlistProps = Omit<AuthFlowProps, "buttonLabel"> & {
-  buttonLabel?: string;
-  onSubmitEmail?: (email: string, config: NamoIDAuthConfig | null) => Promise<void> | void;
-};
-
-export function Waitlist({
-  onSubmitEmail,
-  buttonLabel = "Join waitlist",
-  title = "Join the waitlist",
-  description = "Leave your email and we will route you through the configured access flow.",
-  ...props
-}: WaitlistProps) {
-  const { config, loading, error } = useAuthConfig();
-  const [email, setEmail] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const canSubmitLocally = Boolean(onSubmitEmail);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (onSubmitEmail) {
-      await onSubmitEmail(email, config);
-      setSubmitted(true);
-    }
-  };
-
-  return (
-    <section className={props.className} style={styles.card}>
-      <PanelHeader title={title} description={description} />
-      <StatusLine config={config} loading={loading} error={error} />
-      {submitted ? (
-        <p style={styles.success}>You are on the list.</p>
-      ) : (
-        <form onSubmit={submit} style={styles.form}>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
-            required
-            style={styles.input}
-          />
-          {canSubmitLocally ? (
-            <button type="submit" style={styles.button}>
-              {buttonLabel}
-            </button>
-          ) : (
-            <HostedAuthButton {...props} mode="waitlist">
-              {buttonLabel}
-            </HostedAuthButton>
-          )}
-        </form>
-      )}
-    </section>
-  );
-}
-
-export function AuthCard(props: AuthFlowProps & { mode?: HostedAuthMode }) {
-  if (props.mode === "sign_up") return <SignUp {...props} />;
-  if (props.mode === "waitlist") return <Waitlist {...props} />;
-  return <SignIn {...props} />;
-}
-
-function AuthPanel({
-  mode,
-  title,
-  description,
-  buttonLabel,
-  loadingLabel = "Loading auth configuration...",
-  unavailableLabel = "This flow is not enabled right now.",
-  enabled,
+export function SignIn({
+  title = "Sign in",
+  description = "Continue with the sign-in methods enabled for this app.",
+  buttonLabel = "Sign in",
+  loadingLabel = "Loading sign-in…",
+  unavailableLabel = "Sign-in is unavailable right now.",
   className,
-  ...buttonOptions
-}: AuthFlowProps & {
-  mode: HostedAuthMode;
-  title: string;
-  description: string;
-  buttonLabel: string;
-  loadingLabel?: string;
-  unavailableLabel?: string;
-  enabled: (config: NamoIDAuthConfig) => boolean;
-}) {
+  ...buttonProps
+}: SignInProps) {
   const { config, loading, error } = useAuthConfig();
-  const isEnabled = config ? enabled(config) : false;
-
+  const enabled = Boolean(config?.signin_methods.length);
   return (
     <section className={className} style={styles.card}>
-      <PanelHeader title={title} description={description} />
-      <StatusLine config={config} loading={loading} error={error} loadingLabel={loadingLabel} />
-      <HostedAuthButton {...buttonOptions} mode={mode} disabled={loading || Boolean(error) || !isEnabled}>
-        {isEnabled ? buttonLabel : unavailableLabel}
+      <div style={styles.header}>
+        <h2 style={styles.title}>{title}</h2>
+        <p style={styles.description}>{description}</p>
+      </div>
+      {loading ? <p style={styles.meta}>{loadingLabel}</p> : null}
+      {error ? <p style={styles.error}>{error.message}</p> : null}
+      {config ? (
+        <p style={styles.meta}>
+          {config.signin_methods.length} sign-in method
+          {config.signin_methods.length === 1 ? "" : "s"} available
+        </p>
+      ) : null}
+      <HostedAuthButton
+        {...buttonProps}
+        disabled={buttonProps.disabled || loading || Boolean(error) || !enabled}
+      >
+        {enabled ? buttonLabel : unavailableLabel}
       </HostedAuthButton>
     </section>
   );
 }
 
-function PanelHeader({ title, description }: { title: string; description: string }) {
-  return (
-    <div style={styles.header}>
-      <h2 style={styles.title}>{title}</h2>
-      <p style={styles.description}>{description}</p>
-    </div>
-  );
-}
-
-function StatusLine({
-  config,
-  loading,
-  error,
-  loadingLabel = "Loading auth configuration...",
-}: {
-  config: NamoIDAuthConfig | null;
-  loading: boolean;
-  error: Error | null;
-  loadingLabel?: string;
-}) {
-  if (loading) return <p style={styles.meta}>{loadingLabel}</p>;
-  if (error) return <p style={styles.error}>{error.message}</p>;
-  if (!config) return null;
-  return (
-    <p style={styles.meta}>
-      {config.access_mode} access · {config.signin_methods.length} sign-in method
-      {config.signin_methods.length === 1 ? "" : "s"}
-    </p>
-  );
-}
-
-function labelForMode(mode: HostedAuthMode): string {
-  if (mode === "sign_up") return "Sign up with NamoID";
-  if (mode === "waitlist") return "Join waitlist";
-  return "Sign in with NamoID";
-}
+export type CompletedHostedAuth = {
+  tokens: NamoIDTokenResponse;
+  identity: NamoIDUserInfo;
+  idTokenClaims: ValidatedIDToken;
+};
 
 export async function completeHostedAuthRedirect(
   client: NamoIDClient,
   callbackUrl: string = window.location.href,
-): Promise<NamoIDTokenResponse> {
+): Promise<CompletedHostedAuth> {
   const url = new URL(callbackUrl);
-  const code = url.searchParams.get("code");
-  const returnedState = url.searchParams.get("state");
   const storageKey = transactionStorageKey(client.clientId);
   const raw = sessionStorage.getItem(storageKey);
-  if (!code || !returnedState || !raw) {
-    throw new Error("Hosted Auth callback is missing its transaction");
+  if (!raw) {
+    throw new NamoIDError("Authorization transaction is missing", {
+      code: "missing_oidc_transaction",
+    });
   }
-  const transaction = JSON.parse(raw) as { state: string; codeVerifier: string };
-  if (transaction.state !== returnedState) {
-    throw new Error("Hosted Auth state mismatch");
+  const transaction = JSON.parse(raw) as OIDCTransaction;
+  const returnedState = url.searchParams.get("state");
+  if (!returnedState || transaction.state !== returnedState) {
+    throw new NamoIDError("Authorization state mismatch", { code: "invalid_oidc_state" });
+  }
+  const authError = url.searchParams.get("error");
+  if (authError) {
+    sessionStorage.removeItem(storageKey);
+    throw new NamoIDError(url.searchParams.get("error_description") ?? authError, {
+      code: authError,
+    });
+  }
+  const code = url.searchParams.get("code");
+  if (!code) {
+    throw new NamoIDError("Authorization code is missing", {
+      code: "missing_authorization_code",
+    });
+  }
+  const discovery = await client.auth.getDiscovery();
+  if (
+    discovery.authorization_response_iss_parameter_supported &&
+    url.searchParams.get("iss") !== discovery.issuer
+  ) {
+    throw new NamoIDError("Authorization response issuer mismatch", {
+      code: "issuer_mismatch",
+    });
+  }
+  const tokens = await client.hostedAuth.exchangeCode({
+    code,
+    redirectUri: transaction.redirectUri,
+    codeVerifier: transaction.codeVerifier,
+  });
+  if (!tokens.id_token) {
+    throw new NamoIDError("The token response did not include an ID token", {
+      code: "missing_id_token",
+    });
+  }
+  const idTokenClaims = await validateOIDCIdToken({
+    idToken: tokens.id_token,
+    discovery,
+    clientId: client.clientId,
+    nonce: transaction.nonce,
+  });
+  const identity = await client.hostedAuth.userInfo(tokens.access_token);
+  if (identity.sub !== idTokenClaims.sub) {
+    throw new NamoIDError("ID token and UserInfo subjects do not match", {
+      code: "subject_mismatch",
+    });
   }
   sessionStorage.removeItem(storageKey);
-  return client.hostedAuth.exchangeCode({ code, codeVerifier: transaction.codeVerifier });
+  return { tokens, identity, idTokenClaims };
 }
 
 function transactionStorageKey(clientId: string): string {
-  return `namoid_hosted_auth:${clientId.slice(-12)}`;
+  return `namoid_oidc:${clientId.slice(-12)}`;
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -338,56 +244,19 @@ const styles: Record<string, CSSProperties> = {
     display: "grid",
     gap: 14,
   },
-  header: {
-    display: "grid",
-    gap: 4,
-  },
-  title: {
-    margin: 0,
-    fontSize: 18,
-    lineHeight: 1.2,
-    fontWeight: 650,
-  },
-  description: {
-    margin: 0,
-    color: "#62645f",
-    fontSize: 14,
-    lineHeight: 1.45,
-  },
-  meta: {
-    margin: 0,
-    color: "#73756f",
-    fontSize: 12,
-  },
-  error: {
-    margin: 0,
-    color: "#9f1d1d",
-    fontSize: 12,
-  },
-  success: {
-    margin: 0,
-    color: "#17633e",
-    fontSize: 14,
-  },
-  form: {
-    display: "grid",
-    gap: 10,
-  },
-  input: {
-    border: "1px solid #c9cac2",
-    borderRadius: 7,
-    padding: "10px 12px",
-    fontSize: 14,
-  },
+  header: { display: "grid", gap: 4 },
+  title: { margin: 0, fontSize: 18, lineHeight: 1.2, fontWeight: 650 },
+  description: { margin: 0, color: "#62645f", fontSize: 14, lineHeight: 1.45 },
+  meta: { margin: 0, color: "#73756f", fontSize: 12 },
+  error: { margin: 0, color: "#b42318", fontSize: 13 },
   button: {
     border: 0,
-    borderRadius: 7,
-    background: "#111111",
+    borderRadius: 6,
+    padding: "10px 14px",
+    background: "#0d684f",
     color: "#ffffff",
-    cursor: "pointer",
     fontSize: 14,
     fontWeight: 650,
-    minHeight: 42,
-    padding: "0 16px",
+    cursor: "pointer",
   },
 };

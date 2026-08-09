@@ -1,7 +1,7 @@
 {
   "name": "@namoidhq/react",
-  "version": "2.0.0",
-  "description": "React SDK for NamoID Hosted Auth: provider, hooks, and hosted sign-in, sign-up, and waitlist components.",
+  "version": "3.0.0",
+  "description": "React SDK for NamoID Hosted Auth using OIDC Authorization Code with PKCE and validated callbacks.",
   "keywords": [
     "namoid",
     "authentication",
@@ -44,7 +44,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "pnpm --dir ../js build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@namoidhq/js": "workspace:^"
