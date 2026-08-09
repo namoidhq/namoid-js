@@ -51,6 +51,79 @@ For browser apps, prefer [`@namoidhq/react`](https://www.npmjs.com/package/@namo
 
 For confidential Next.js apps, use [`@namoidhq/nextjs`](https://www.npmjs.com/package/@namoidhq/nextjs) so the Client Secret, PKCE verifier, callback validation, refresh token, and application session remain server-side.
 
+## Hosted sign-in in a popup
+
+Popup delivery uses the same OIDC Authorization Code + PKCE flow. Register a
+same-origin callback such as `https://your-app.com/auth/namoid/popup` and render
+this minimal bridge on that route:
+
+```ts
+import { relayHostedAuthPopupCallback } from "@namoidhq/js";
+
+relayHostedAuthPopupCallback();
+```
+
+Then open Hosted Auth from a direct user click:
+
+```ts
+const result = await namoid.hostedAuth.popup({
+  redirectUri: `${window.location.origin}/auth/namoid/popup`,
+  scopes: ["openid", "email"],
+});
+
+const tokens = await namoid.hostedAuth.exchangeCode({
+  code: result.code,
+  redirectUri: result.transaction.redirectUri,
+  codeVerifier: result.transaction.codeVerifier,
+});
+```
+
+The SDK binds the callback to a random, same-origin per-popup channel and
+validates callback origin, state, and issuer. It also verifies the exact popup
+handle when the browser preserves `window.opener`. The bridge relays only the
+code, state, issuer, or a bounded OAuth error—never tokens or profile data. If
+a browser blocks the popup, catch `popup_blocked` and offer a fresh normal
+full-page redirect.
+
+## Custom SPA UI with native email OTP (Test preview)
+
+Native email OTP is a guarded Test-only preview for trusted first-party SPA
+applications. Enable it in the application’s Login delivery settings. Read
+`turnstile_site_key` and `native_auth_turnstile_actions` from
+`namoid.auth.getConfig()` and obtain a fresh Turnstile token for each protected
+step.
+
+```ts
+const started = await namoid.nativeAuth.start({
+  redirectUri: `${window.location.origin}/auth/callback`,
+  scopes: ["openid", "email"],
+  turnstileToken: startTurnstileToken,
+});
+
+await namoid.nativeAuth.requestEmailOtp({
+  flowToken: started.flowToken,
+  email,
+  turnstileToken: otpTurnstileToken,
+});
+
+const authorization = await namoid.nativeAuth.verifyEmailOtp({
+  flowToken: started.flowToken,
+  email,
+  code,
+  transaction: started.transaction,
+});
+
+const tokens = await namoid.hostedAuth.exchangeCode({
+  code: authorization.code,
+  redirectUri: started.transaction.redirectUri,
+  codeVerifier: started.transaction.codeVerifier,
+});
+```
+
+Social login, passkeys, MFA, waitlists, custom registration fields, and mobile
+native clients continue through Hosted Auth. Do not store bearer or refresh
+tokens in browser storage.
+
 Docs: <https://docs.namoid.in> · Contact: hello@namoid.in
 
 ## License

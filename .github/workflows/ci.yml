@@ -29,3 +29,12 @@ jobs:
 
       - name: Typecheck
         run: pnpm -r typecheck
+
+      - name: Unit tests
+        run: node --test tests/*.test.mjs packages/react/tests/*.test.mjs
+
+      - name: Install browser engines
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      - name: Browser tests
+        run: pnpm exec playwright test

@@ -1,6 +1,6 @@
 {
   "name": "@namoidhq/js",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Core JavaScript SDK for NamoID Hosted Auth using OpenID Connect Authorization Code with PKCE.",
   "keywords": [
     "namoid",

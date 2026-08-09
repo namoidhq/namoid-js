@@ -3,7 +3,10 @@ import test from "node:test";
 
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
-import { createNamoIDClient } from "../packages/js/dist/index.js";
+import {
+  createNamoIDClient,
+  relayHostedAuthPopupCallback,
+} from "../packages/js/dist/index.js";
 import { createNamoIDNextClient } from "../packages/nextjs/dist/index.js";
 
 const issuer = "https://tenant.sandbox.namoid.in";
@@ -19,12 +22,19 @@ const config = {
   access_mode: "open",
   waitlist_enabled: false,
   signin_methods: ["email_otp"],
+  login_delivery_modes: ["redirect", "native"],
+  turnstile_site_key: "test-site-key",
+  native_auth_turnstile_actions: {
+    start: "native_start",
+    email_otp_request: "otp_send",
+  },
   mfa_mode: "off",
   brand_logo_url: null,
   brand_primary_color: null,
   brand_accent_color: null,
   brand_dark_mode: false,
   brand_locale_default: "en",
+  support_email: "support@example.com",
   signup_tos_required: false,
   signup_tos_url: null,
   signup_privacy_url: null,
@@ -82,6 +92,185 @@ test("browser client resolves discovery and builds Authorization Code + PKCE", a
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
   assert.equal(url.searchParams.has("completion_mode"), false);
   assert.ok(started.transaction.codeVerifier.length >= 43);
+});
+
+test("native email OTP remains bound to the standard OIDC transaction", async () => {
+  const requests = [];
+  let nativeState;
+  const client = createNamoIDClient({
+    clientId,
+    fetcher: async (request, init = {}) => {
+      const url = new URL(request);
+      const metadata = metadataResponse(url);
+      if (metadata) return metadata;
+      const body = init.body ? JSON.parse(init.body) : null;
+      requests.push({ url, init, body });
+      if (url.pathname === "/v1/auth/native/start") {
+        nativeState = body.state;
+        return Response.json({
+          flow_token: "native-flow-token-with-sufficient-length-123456",
+          next_step: "email_otp",
+          expires_in: 600,
+        });
+      }
+      if (url.pathname === "/v1/auth/native/email-otp/request") {
+        return Response.json({ status: "pending" });
+      }
+      if (url.pathname === "/v1/auth/native/email-otp/verify") {
+        return Response.json({
+          code: "native-authorization-code",
+          state: nativeState,
+          issuer,
+          redirect_uri: "https://spa.example.com/callback",
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const started = await client.nativeAuth.start({
+    redirectUri: "https://spa.example.com/callback",
+    scopes: ["openid", "email"],
+    turnstileToken: "turnstile-start",
+  });
+  await client.nativeAuth.requestEmailOtp({
+    flowToken: started.flowToken,
+    email: "person@example.com",
+    turnstileToken: "turnstile-otp",
+  });
+  const result = await client.nativeAuth.verifyEmailOtp({
+    flowToken: started.flowToken,
+    email: "person@example.com",
+    code: "123456",
+    transaction: started.transaction,
+  });
+
+  assert.equal(result.code, "native-authorization-code");
+  assert.equal(result.state, started.transaction.state);
+  assert.equal(requests[0].body.code_challenge, started.transaction.codeChallenge);
+  assert.equal(requests[0].body.turnstile_token, "turnstile-start");
+  assert.equal(requests[1].body.turnstile_token, "turnstile-otp");
+  assert.equal(requests[2].body.code, "123456");
+});
+
+test("popup mode accepts only the expected popup, origin, state, and issuer", async () => {
+  const listeners = new Set();
+  let authorizationUrl;
+  const popupStorage = new Map();
+  const popup = {
+    closed: false,
+    close() {
+      this.closed = true;
+    },
+    sessionStorage: {
+      setItem(key, value) {
+        popupStorage.set(key, value);
+      },
+    },
+    location: {
+      replace(value) {
+        authorizationUrl = value;
+        const callback = new URL(value);
+        setTimeout(() => {
+          for (const listener of listeners) {
+            listener({
+              source: popup,
+              origin: "https://spa.example.com",
+              data: {
+                type: "namoid:oidc:popup-callback",
+                version: 1,
+                state: callback.searchParams.get("state"),
+                issuer,
+                code: "popup-code",
+                error: null,
+                errorDescription: null,
+              },
+            });
+          }
+        }, 0);
+      },
+    },
+  };
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    location: {
+      origin: "https://spa.example.com",
+      href: "https://spa.example.com/",
+      assign() {},
+    },
+    open: () => popup,
+    addEventListener: (_name, listener) => listeners.add(listener),
+    removeEventListener: (_name, listener) => listeners.delete(listener),
+    setInterval,
+    clearInterval,
+    setTimeout,
+    clearTimeout,
+  };
+  try {
+    const client = createNamoIDClient({
+      clientId,
+      fetcher: async (request) => {
+        const response = metadataResponse(new URL(request));
+        if (response) return response;
+        throw new Error(`Unexpected request: ${request}`);
+      },
+    });
+    const result = await client.hostedAuth.popup({
+      redirectUri: "https://spa.example.com/popup-callback",
+      scopes: ["openid", "email"],
+    });
+    assert.equal(result.code, "popup-code");
+    assert.equal(result.state, result.transaction.state);
+    assert.equal(new URL(authorizationUrl).pathname, "/oauth/authorize");
+    assert.equal(popup.closed, true);
+    assert.equal(listeners.size, 0);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
+});
+
+test("popup callback bridge relays only the bounded OAuth result", async () => {
+  let delivered;
+  let closed = false;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    location: {
+      origin: "https://spa.example.com",
+      href:
+        "https://spa.example.com/popup-callback?code=code&state=state&iss=" +
+        encodeURIComponent(issuer),
+    },
+    opener: {
+      closed: false,
+      postMessage(payload, targetOrigin) {
+        delivered = { payload, targetOrigin };
+      },
+    },
+    close() {
+      closed = true;
+    },
+  };
+  try {
+    relayHostedAuthPopupCallback();
+    assert.equal(delivered.targetOrigin, "https://spa.example.com");
+    assert.deepEqual(Object.keys(delivered.payload).sort(), [
+      "code",
+      "error",
+      "errorDescription",
+      "issuer",
+      "state",
+      "type",
+      "version",
+    ]);
+    assert.equal(delivered.payload.code, "code");
+    assert.equal(closed, false);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    assert.equal(closed, true);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("confidential code exchange uses the discovered form-encoded token endpoint", async () => {
