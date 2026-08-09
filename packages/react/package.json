@@ -1,6 +1,6 @@
 {
   "name": "@namoidhq/react",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "React SDK for NamoID Hosted Auth using OIDC Authorization Code with PKCE and validated callbacks.",
   "keywords": [
     "namoid",
