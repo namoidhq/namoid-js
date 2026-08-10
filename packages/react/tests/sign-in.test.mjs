@@ -61,6 +61,6 @@ test("native email OTP drop-in renders a safe loading state", () => {
   assert.match(markup, /Email/);
   assert.match(markup, /Continue with email/);
   assert.match(markup, /Secured by NamoID/);
-  assert.match(markup, /disabled/);
+  assert.match(markup, /<input[^>]*id="namoid-native-email"[^>]*disabled=""/);
   assert.doesNotMatch(markup, /type="password"/);
 });
