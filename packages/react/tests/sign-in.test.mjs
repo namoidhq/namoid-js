@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   NamoIDProvider,
+  NamoIDNativeEmailOtpSignIn,
   NamoIDSignIn,
   NamoIDSignInModal,
 } from "../dist/index.js";
@@ -46,4 +47,20 @@ test("modal wrapper exposes an accessible dialog and close control", () => {
   assert.match(markup, /aria-label="Continue to Example"/);
   assert.match(markup, /aria-label="Close sign-in"/);
   assert.match(markup, /Continue to Example/);
+});
+
+test("native email OTP drop-in renders a safe loading state", () => {
+  const markup = renderToStaticMarkup(
+    insideProvider(
+      createElement(NamoIDNativeEmailOtpSignIn, {
+        ...commonProps,
+      }),
+    ),
+  );
+
+  assert.match(markup, /Email/);
+  assert.match(markup, /Continue with email/);
+  assert.match(markup, /Secured by NamoID/);
+  assert.match(markup, /disabled/);
+  assert.doesNotMatch(markup, /type="password"/);
 });

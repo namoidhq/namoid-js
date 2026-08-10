@@ -22,6 +22,26 @@ const config = {
   access_mode: "open",
   waitlist_enabled: false,
   signin_methods: ["email_otp"],
+  social_providers: [
+    { name: "google", display_name: "Google" },
+    { name: "github", display_name: "GitHub" },
+  ],
+  sign_in_choices: [
+    {
+      id: "email_otp",
+      display_name: "Email code",
+      category: "local",
+      delivery: "native_challenge",
+      authorization_parameter: null,
+    },
+    {
+      id: "google",
+      display_name: "Google",
+      category: "federated",
+      delivery: "browser_redirect",
+      authorization_parameter: "identity_provider",
+    },
+  ],
   login_delivery_modes: ["redirect", "native"],
   turnstile_site_key: "test-site-key",
   native_auth_turnstile_actions: {
@@ -52,7 +72,7 @@ const discovery = {
   grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
   token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
-  scopes_supported: ["openid", "email", "offline_access"],
+  scopes_supported: ["openid", "profile", "email", "offline_access"],
   authorization_response_iss_parameter_supported: true,
 };
 
@@ -66,6 +86,20 @@ function metadataResponse(url) {
   }
   return null;
 }
+
+test("browser client exposes the server-resolved sign-in delivery contract", async () => {
+  const client = createNamoIDClient({
+    clientId,
+    fetcher: async (request) => {
+      const response = metadataResponse(new URL(request));
+      if (response) return response;
+      throw new Error(`Unexpected request: ${request}`);
+    },
+  });
+
+  const resolved = await client.auth.getConfig();
+  assert.deepEqual(resolved.sign_in_choices, config.sign_in_choices);
+});
 
 test("browser client resolves discovery and builds Authorization Code + PKCE", async () => {
   const client = createNamoIDClient({
@@ -92,6 +126,91 @@ test("browser client resolves discovery and builds Authorization Code + PKCE", a
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
   assert.equal(url.searchParams.has("completion_mode"), false);
   assert.ok(started.transaction.codeVerifier.length >= 43);
+});
+
+test("browser client hides the standard identity scopes behind safe defaults", async () => {
+  const client = createNamoIDClient({
+    clientId,
+    fetcher: async (request) => {
+      const response = metadataResponse(new URL(request));
+      if (response) return response;
+      throw new Error(`Unexpected request: ${request}`);
+    },
+  });
+  const started = await client.hostedAuth.start({
+    redirectUri: "https://spa.example.com/callback",
+  });
+
+  assert.equal(
+    new URL(started.authorizationUrl).searchParams.get("scope"),
+    "openid profile email",
+  );
+});
+
+test("browser client can select a configured identity provider", async () => {
+  const client = createNamoIDClient({
+    clientId,
+    fetcher: async (request) => {
+      const response = metadataResponse(new URL(request));
+      if (response) return response;
+      throw new Error(`Unexpected request: ${request}`);
+    },
+  });
+  const started = await client.hostedAuth.start({
+    redirectUri: "https://spa.example.com/callback",
+    identityProvider: "google",
+    extraParams: { identity_provider: "github" },
+  });
+  const url = new URL(started.authorizationUrl);
+
+  assert.equal(url.searchParams.get("identity_provider"), "google");
+});
+
+test("browser client can select the hosted passkey ceremony", async () => {
+  const client = createNamoIDClient({
+    clientId,
+    fetcher: async (request) => {
+      const response = metadataResponse(new URL(request));
+      if (response) return response;
+      throw new Error(`Unexpected request: ${request}`);
+    },
+  });
+  const started = await client.hostedAuth.start({
+    redirectUri: "https://spa.example.com/callback",
+    authenticationMethod: "passkey",
+    extraParams: { authentication_method: "password" },
+  });
+
+  assert.equal(
+    new URL(started.authorizationUrl).searchParams.get("authentication_method"),
+    "passkey",
+  );
+});
+
+test("browser client can select each configured hosted local ceremony", async () => {
+  const client = createNamoIDClient({
+    clientId,
+    fetcher: async (request) => {
+      const response = metadataResponse(new URL(request));
+      if (response) return response;
+      throw new Error(`Unexpected request: ${request}`);
+    },
+  });
+  for (const authenticationMethod of [
+    "email_otp",
+    "magic_link",
+    "password",
+    "phone_otp",
+  ]) {
+    const started = await client.hostedAuth.start({
+      redirectUri: "https://spa.example.com/callback",
+      authenticationMethod,
+    });
+    assert.equal(
+      new URL(started.authorizationUrl).searchParams.get("authentication_method"),
+      authenticationMethod,
+    );
+  }
 });
 
 test("native email OTP remains bound to the standard OIDC transaction", async () => {
@@ -435,6 +554,10 @@ test("Next.js callback validates state, issuer, signed ID token, nonce, and User
   const { authorizationUrl, transaction: currentTransaction } =
     await client.createTransaction({ returnTo: "/dashboard" });
   assert.equal(new URL(authorizationUrl).pathname, "/oauth/authorize");
+  assert.equal(
+    new URL(authorizationUrl).searchParams.get("scope"),
+    "openid profile email offline_access",
+  );
 
   const request = new Request(
     `${redirectUri}?code=code&state=${currentTransaction.state}&iss=${encodeURIComponent(issuer)}`,

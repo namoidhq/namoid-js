@@ -17,7 +17,6 @@ const namoid = createNamoIDClient({
 
 const started = await namoid.hostedAuth.start({
   redirectUri: "https://your-app.com/auth/callback",
-  scopes: ["openid", "email"],
 });
 
 // Retain this one-time transaction until the callback. Do not store tokens here.
@@ -68,7 +67,9 @@ Then open Hosted Auth from a direct user click:
 ```ts
 const result = await namoid.hostedAuth.popup({
   redirectUri: `${window.location.origin}/auth/namoid/popup`,
-  scopes: ["openid", "email"],
+  // Optional: identityProvider: "google",
+  // Optional: authenticationMethod: "passkey", "password", "email_otp",
+  // "magic_link", or "phone_otp",
 });
 
 const tokens = await namoid.hostedAuth.exchangeCode({
@@ -85,18 +86,29 @@ code, state, issuer, or a bounded OAuth error—never tokens or profile data. If
 a browser blocks the popup, catch `popup_blocked` and offer a fresh normal
 full-page redirect.
 
+`identityProvider` selects a configured social provider. `authenticationMethod`
+selects a configured hosted passkey, password, email-code, magic-link, or
+phone-code ceremony. All remain ordinary OIDC Authorization Code + PKCE
+requests; provider credentials, passwords, OTPs, and WebAuthn challenges never
+move into the relying-party DOM.
+
+`namoid.auth.getConfig()` includes `sign_in_choices`, which tells UI adapters
+whether each configured choice uses a `native_challenge` or a
+`browser_redirect`. Consume this field instead of inferring delivery from a
+method name. The older method and provider lists remain available for
+compatibility with earlier NamoID deployments.
+
 ## Custom SPA UI with native email OTP (Test preview)
 
 Native email OTP is a guarded Test-only preview for trusted first-party SPA
-applications. Enable it in the application’s Login delivery settings. Read
-`turnstile_site_key` and `native_auth_turnstile_actions` from
+applications provisioned for the preview. It is not a general Console setting.
+Read `turnstile_site_key` and `native_auth_turnstile_actions` from
 `namoid.auth.getConfig()` and obtain a fresh Turnstile token for each protected
 step.
 
 ```ts
 const started = await namoid.nativeAuth.start({
   redirectUri: `${window.location.origin}/auth/callback`,
-  scopes: ["openid", "email"],
   turnstileToken: startTurnstileToken,
 });
 

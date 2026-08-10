@@ -59,7 +59,11 @@ export const GET = (request: Request) =>
   });
 ```
 
-The default scopes are `openid email offline_access`. A refresh token is returned only when the issuer grants `offline_access`; store it only in a protected server-side session.
+NamoID requests the identity scopes `openid profile email` internally and adds
+`offline_access` for this confidential server-side flow. Customers do not
+configure scopes for ordinary sign-in. A refresh token is returned only when
+the issuer grants `offline_access`; store it only in a protected server-side
+session.
 
 ## Refresh and logout
 

@@ -15,7 +15,6 @@ export type NamoIDNextOptions = {
   postLoginRedirectPath?: string;
   postLogoutRedirectPath?: string;
   errorRedirectPath?: string;
-  defaultScopes?: string[];
   cookiePrefix?: string;
   transactionMaxAgeSeconds?: number;
   fetcher?: typeof fetch;
@@ -24,7 +23,6 @@ export type NamoIDNextOptions = {
 export type StartLoginOptions = {
   returnTo?: string;
   callbackUrl?: string;
-  scopes?: string[];
   prompt?: "login";
   resource?: string;
   extraParams?: Record<string, string | number | boolean | null | undefined>;
@@ -63,7 +61,7 @@ export type StoredTransaction = {
 export type NamoIDNextClient = {
   login: (options?: StartLoginOptions) => Promise<Response>;
   callback: (request: Request, options?: CallbackOptions) => Promise<Response>;
-  refresh: (refreshToken: string, scopes?: string[]) => Promise<NamoIDTokenResponse>;
+  refresh: (refreshToken: string) => Promise<NamoIDTokenResponse>;
   logout: (options?: LogoutOptions) => Promise<Response>;
   createTransaction: (options?: StartLoginOptions) => Promise<{
     authorizationUrl: string;
@@ -79,7 +77,7 @@ const DEFAULT_POST_LOGOUT_REDIRECT_PATH = "/login";
 const DEFAULT_ERROR_REDIRECT_PATH = "/login";
 const DEFAULT_COOKIE_PREFIX = "namoid";
 const DEFAULT_TRANSACTION_MAX_AGE_SECONDS = 10 * 60;
-const DEFAULT_SCOPES = ["openid", "email", "offline_access"];
+const SESSION_SCOPES = ["openid", "profile", "email", "offline_access"];
 
 export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextClient {
   assertRequired(options.clientId, "clientId");
@@ -91,7 +89,6 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   const postLoginRedirectPath = options.postLoginRedirectPath ?? DEFAULT_POST_LOGIN_REDIRECT_PATH;
   const postLogoutRedirectPath = options.postLogoutRedirectPath ?? DEFAULT_POST_LOGOUT_REDIRECT_PATH;
   const errorRedirectPath = options.errorRedirectPath ?? DEFAULT_ERROR_REDIRECT_PATH;
-  const defaultScopes = options.defaultScopes ?? DEFAULT_SCOPES;
   const cookiePrefix = options.cookiePrefix ?? DEFAULT_COOKIE_PREFIX;
   const transactionMaxAgeSeconds =
     options.transactionMaxAgeSeconds ?? DEFAULT_TRANSACTION_MAX_AGE_SECONDS;
@@ -198,11 +195,10 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
         return withClearedTransactionCookies(fallback);
       }
     },
-    refresh: (refreshToken, scopes) =>
+    refresh: (refreshToken) =>
       oidc.hostedAuth.refresh({
         refreshToken,
         clientSecret: options.clientSecret,
-        scopes,
       }),
     logout: async (logoutOptions = {}) => {
       const tokenToRevoke = logoutOptions.refreshToken ?? logoutOptions.accessToken;
@@ -236,7 +232,7 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
       loginOptions.callbackUrl ?? absoluteUrl(appBaseUrl, callbackPath);
     const started = await oidc.hostedAuth.start({
       redirectUri,
-      scopes: loginOptions.scopes ?? defaultScopes,
+      scopes: SESSION_SCOPES,
       prompt: loginOptions.prompt,
       resource: loginOptions.resource,
       extraParams: loginOptions.extraParams,
