@@ -378,11 +378,19 @@ function loadManagedTurnstile(): Promise<ManagedTurnstileApi> {
     const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
     const script = existing ?? document.createElement("script");
     let settled = false;
+    let timeoutId: number | null = null;
+    const clearTimeoutIfPending = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
     const finish = () => {
       if (settled) return;
       const api = (window as TurnstileWindow).turnstile;
       if (!api) {
         settled = true;
+        clearTimeoutIfPending();
         managedTurnstileScript = null;
         reject(
           new NamoIDError("Human verification could not be loaded", {
@@ -392,11 +400,13 @@ function loadManagedTurnstile(): Promise<ManagedTurnstileApi> {
         return;
       }
       settled = true;
+      clearTimeoutIfPending();
       resolve(api);
     };
     const fail = () => {
       if (settled) return;
       settled = true;
+      clearTimeoutIfPending();
       managedTurnstileScript = null;
       reject(
         new NamoIDError("Human verification could not be loaded", {
@@ -413,7 +423,7 @@ function loadManagedTurnstile(): Promise<ManagedTurnstileApi> {
       script.defer = true;
       document.head.appendChild(script);
     }
-    window.setTimeout(() => {
+    timeoutId = window.setTimeout(() => {
       if ((window as TurnstileWindow).turnstile) finish();
       else fail();
     }, 15_000);
@@ -441,7 +451,12 @@ async function getManagedTurnstileToken({
   return new Promise<string>((resolve, reject) => {
     let widgetId: string | number | null = null;
     let settled = false;
+    let timeoutId: number | null = null;
     const cleanup = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       if (widgetId !== null) api.remove(widgetId);
       container.remove();
     };
@@ -468,16 +483,21 @@ async function getManagedTurnstileToken({
         }),
       );
     };
-    widgetId = api.render(container, {
-      sitekey: siteKey,
-      action,
-      size: "invisible",
-      execution: "execute",
-      callback: succeed,
-      "error-callback": fail,
-      "expired-callback": fail,
-    });
-    api.execute(widgetId);
+    timeoutId = window.setTimeout(fail, 15_000);
+    try {
+      widgetId = api.render(container, {
+        sitekey: siteKey,
+        action,
+        size: "invisible",
+        execution: "execute",
+        callback: succeed,
+        "error-callback": fail,
+        "expired-callback": fail,
+      });
+      api.execute(widgetId);
+    } catch {
+      fail();
+    }
   });
 }
 
@@ -802,6 +822,7 @@ export function NamoIDNativeEmailOtpSignIn({
     new Set(["email_otp"]),
   );
   const showHostedMethods = hostedFallback === "popup" && hostedActions.length > 0;
+  const codeIsValid = /^\d{6}$/.test(code);
 
   return (
     <section
@@ -878,12 +899,12 @@ export function NamoIDNativeEmailOtpSignIn({
           />
           <button
             type="submit"
-            disabled={verifying || !/^\d{6}$/.test(code)}
+            disabled={verifying || !codeIsValid}
             style={{
               ...styles.button,
               background: accent,
               color: readableTextColor(accent),
-              opacity: verifying || !/^\d{6}$/.test(code) ? 0.62 : 1,
+              opacity: verifying || !codeIsValid ? 0.62 : 1,
             }}
           >
             {verifying ? "Verifying…" : "Verify code"}
