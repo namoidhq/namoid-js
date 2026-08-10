@@ -9,6 +9,26 @@ export type NamoIDSignInMethod =
   | "passkey"
   | string;
 
+export type NamoIDHostedAuthenticationMethod =
+  | "email_otp"
+  | "magic_link"
+  | "password"
+  | "phone_otp"
+  | "passkey";
+
+export type NamoIDSocialProvider = {
+  name: string;
+  display_name: string;
+};
+
+export type NamoIDSignInChoice = {
+  id: string;
+  display_name: string;
+  category: "local" | "federated";
+  delivery: "native_challenge" | "browser_redirect";
+  authorization_parameter: "authentication_method" | "identity_provider" | null;
+};
+
 export type NamoIDAuthConfig = {
   client_id: string;
   issuer: string;
@@ -17,6 +37,10 @@ export type NamoIDAuthConfig = {
   access_mode: "closed" | "open" | "invite_only" | "domain_allowlist" | string;
   waitlist_enabled: boolean;
   signin_methods: NamoIDSignInMethod[];
+  /** Configured providers that can be launched directly through Hosted Auth. */
+  social_providers?: NamoIDSocialProvider[];
+  /** Explicit native-versus-hosted ceremony contract. Optional for compatibility with older deployments. */
+  sign_in_choices?: NamoIDSignInChoice[];
   login_delivery_modes: string[];
   turnstile_site_key: string | null;
   native_auth_turnstile_actions: Record<string, string>;
@@ -63,6 +87,10 @@ export type StartAuthorizationOptions = {
   scopes?: string[];
   prompt?: "login";
   resource?: string;
+  /** Selects a configured social provider while preserving the standard OIDC flow. */
+  identityProvider?: string;
+  /** Selects a configured hosted authentication ceremony without collecting credentials in the customer page. */
+  authenticationMethod?: NamoIDHostedAuthenticationMethod;
   extraParams?: Record<string, string | number | boolean | null | undefined>;
 };
 
@@ -222,7 +250,7 @@ export class NamoIDError extends Error {
 }
 
 const DEFAULT_API_BASE_URL = "https://api.namoid.in";
-const DEFAULT_SCOPES = ["openid", "email"];
+const DEFAULT_IDENTITY_SCOPES = ["openid", "profile", "email"];
 
 export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
   if (!options.clientId) {
@@ -743,6 +771,12 @@ export function buildAuthorizationUrl(
   url.searchParams.set("code_challenge_method", options.codeChallengeMethod ?? "S256");
   if (options.prompt) url.searchParams.set("prompt", options.prompt);
   if (options.resource) url.searchParams.set("resource", options.resource);
+  if (options.identityProvider) {
+    url.searchParams.set("identity_provider", options.identityProvider);
+  }
+  if (options.authenticationMethod) {
+    url.searchParams.set("authentication_method", options.authenticationMethod);
+  }
   for (const [key, value] of Object.entries(options.extraParams ?? {})) {
     if (RESERVED_AUTHORIZATION_PARAMS.has(key)) continue;
     if (value !== null && value !== undefined) url.searchParams.set(key, String(value));
@@ -976,7 +1010,7 @@ async function nativeAuthRequest<T = unknown>(options: {
 }
 
 function normalizedScopes(scopes?: string[]): string[] {
-  const values = scopes?.length ? scopes : DEFAULT_SCOPES;
+  const values = scopes?.length ? scopes : DEFAULT_IDENTITY_SCOPES;
   return Array.from(new Set(["openid", ...values.filter(Boolean)]));
 }
 
@@ -1073,4 +1107,6 @@ const RESERVED_AUTHORIZATION_PARAMS = new Set([
   "code_challenge_method",
   "prompt",
   "resource",
+  "identity_provider",
+  "authentication_method",
 ]);

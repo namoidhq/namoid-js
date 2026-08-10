@@ -6,10 +6,13 @@ import {
   type NamoIDAuthConfig,
   type NamoIDClient,
   type NamoIDClientOptions,
+  type NamoIDHostedAuthenticationMethod,
+  type NamoIDSignInChoice,
   type NamoIDTokenResponse,
   type NamoIDUserInfo,
   type OIDCTransaction,
   type PopupAuthorizationResult,
+  type StartAuthorizationOptions,
 } from "@namoidhq/js";
 import { validateOIDCIdToken, type ValidatedIDToken } from "@namoidhq/js/server";
 import {
@@ -74,7 +77,6 @@ export function useAuthConfig(): UseAuthConfigState {
 
 export type HostedAuthButtonProps = {
   redirectUri: string;
-  scopes?: string[];
   prompt?: "login";
   children?: ReactNode;
   className?: string;
@@ -84,7 +86,6 @@ export type HostedAuthButtonProps = {
 
 export function HostedAuthButton({
   redirectUri,
-  scopes,
   prompt,
   children,
   className,
@@ -96,7 +97,7 @@ export function HostedAuthButton({
   const start = async () => {
     setStarting(true);
     try {
-      await startHostedAuthRedirect(client, { redirectUri, scopes, prompt });
+      await startHostedAuthRedirect(client, { redirectUri, prompt });
     } finally {
       setStarting(false);
     }
@@ -125,7 +126,6 @@ export type NamoIDSignInStatus =
 
 export type UseNamoIDSignInOptions = {
   redirectUri: string;
-  scopes?: string[];
   prompt?: "login";
   timeoutMs?: number;
   fallback?: "redirect" | "none";
@@ -138,17 +138,115 @@ export type UseNamoIDSignInState = {
   status: NamoIDSignInStatus;
   error: Error | null;
   ready: boolean;
-  signIn: () => Promise<void>;
+  signIn: (selection?: NamoIDSignInSelection) => Promise<void>;
   reset: () => void;
 };
 
+export type NamoIDSignInSelection = {
+  identityProvider?: string;
+  authenticationMethod?: NamoIDHostedAuthenticationMethod;
+};
+
+const HOSTED_AUTHENTICATION_METHODS: ReadonlyArray<{
+  method: NamoIDHostedAuthenticationMethod;
+  label: string;
+}> = [
+  { method: "passkey", label: "Use a passkey" },
+  { method: "email_otp", label: "Continue with an email code" },
+  { method: "magic_link", label: "Email me a sign-in link" },
+  { method: "password", label: "Use your password" },
+  { method: "phone_otp", label: "Continue with a phone code" },
+];
+
+function configuredHostedMethods(
+  config: NamoIDAuthConfig | null,
+  excluded: ReadonlySet<NamoIDHostedAuthenticationMethod> = new Set(),
+) {
+  return HOSTED_AUTHENTICATION_METHODS.filter(
+    ({ method }) => config?.signin_methods.includes(method) && !excluded.has(method),
+  );
+}
+
+type ConfiguredSignInAction = {
+  key: string;
+  label: string;
+  selection: NamoIDSignInSelection;
+};
+
+function hostedMethodLabel(choice: NamoIDSignInChoice): string {
+  return (
+    HOSTED_AUTHENTICATION_METHODS.find(({ method }) => method === choice.id)?.label ??
+    choice.display_name
+  );
+}
+
+function configuredBrowserRedirectActions(
+  config: NamoIDAuthConfig | null,
+  excluded: ReadonlySet<string> = new Set(),
+): ConfiguredSignInAction[] {
+  if (config?.sign_in_choices) {
+    return config.sign_in_choices
+      .filter(
+        (choice) =>
+          choice.delivery === "browser_redirect" &&
+          choice.authorization_parameter !== null &&
+          !excluded.has(choice.id),
+      )
+      .map((choice) => ({
+        key: `${choice.category}:${choice.id}`,
+        label:
+          choice.category === "federated"
+            ? `Continue with ${choice.display_name}`
+            : hostedMethodLabel(choice),
+        selection:
+          choice.authorization_parameter === "identity_provider"
+            ? { identityProvider: choice.id }
+            : { authenticationMethod: choice.id as NamoIDHostedAuthenticationMethod },
+      }));
+  }
+
+  return [
+    ...configuredHostedMethods(
+      config,
+      new Set(
+        [...excluded].filter((method): method is NamoIDHostedAuthenticationMethod =>
+          HOSTED_AUTHENTICATION_METHODS.some((candidate) => candidate.method === method),
+        ),
+      ),
+    ).map(({ method, label }) => ({
+      key: `local:${method}`,
+      label,
+      selection: { authenticationMethod: method },
+    })),
+    ...(config?.social_providers ?? [])
+      .filter((provider) => !excluded.has(provider.name))
+      .map((provider) => ({
+        key: `federated:${provider.name}`,
+        label: `Continue with ${provider.display_name}`,
+        selection: { identityProvider: provider.name },
+      })),
+  ];
+}
+
+function hasNativeEmailOtp(config: NamoIDAuthConfig | null): boolean {
+  if (config?.sign_in_choices) {
+    return config.sign_in_choices.some(
+      (choice) => choice.id === "email_otp" && choice.delivery === "native_challenge",
+    );
+  }
+  return Boolean(
+    config?.login_delivery_modes.includes("native") &&
+      config.signin_methods.includes("email_otp"),
+  );
+}
+
 /**
- * Headless controller for the popup-first Hosted Auth experience.
- * Credentials, social providers, MFA, and consent stay on NamoID Hosted Auth.
+ * Headless controller for the popup-first Hosted Auth experience. A configured
+ * social provider may be selected directly; federation, MFA, and consent still
+ * execute on NamoID Hosted Auth.
  */
 export function useNamoIDSignIn({
   redirectUri,
-  scopes,
   prompt,
   timeoutMs,
   fallback = "redirect",
@@ -163,23 +261,24 @@ export function useNamoIDSignIn({
     !loading &&
       !configError &&
       redirectUri &&
-      config?.signin_methods.length &&
-      config.login_delivery_modes.includes("popup"),
+      configuredBrowserRedirectActions(config).length > 0 &&
+      config?.login_delivery_modes.includes("popup"),
   );
   const reset = useCallback(() => {
     setFlowError(null);
     setStatus("idle");
   }, []);
-  const signIn = useCallback(async () => {
+  const signIn = useCallback(async (selection?: NamoIDSignInSelection) => {
     if (!ready) return;
     setFlowError(null);
     setStatus("opening");
     try {
       const authorization = await client.hostedAuth.popup({
         redirectUri,
-        scopes,
         prompt,
         timeoutMs,
+        identityProvider: selection?.identityProvider,
+        authenticationMethod: selection?.authenticationMethod,
       });
       setStatus("completing");
       const completed = await completeHostedAuthPopup(client, authorization);
@@ -194,7 +293,12 @@ export function useNamoIDSignIn({
       ) {
         setStatus("redirecting");
         try {
-          await startHostedAuthRedirect(client, { redirectUri, scopes, prompt });
+          await startHostedAuthRedirect(client, {
+            redirectUri,
+            prompt,
+            identityProvider: selection?.identityProvider,
+            authenticationMethod: selection?.authenticationMethod,
+          });
         } catch (redirectValue) {
           const redirectError =
             redirectValue instanceof Error
@@ -210,7 +314,7 @@ export function useNamoIDSignIn({
       setStatus("error");
       onError?.(error);
     }
-  }, [client, fallback, onComplete, onError, prompt, ready, redirectUri, scopes, timeoutMs]);
+  }, [client, fallback, onComplete, onError, prompt, ready, redirectUri, timeoutMs]);
 
   return {
     config,
@@ -218,6 +322,311 @@ export function useNamoIDSignIn({
     error: configError ?? flowError,
     ready,
     signIn,
+    reset,
+  };
+}
+
+export type NamoIDNativeEmailOtpStatus =
+  | "idle"
+  | "loading"
+  | "requesting"
+  | "code_required"
+  | "verifying"
+  | "complete"
+  | "error";
+
+export type NamoIDTurnstileChallenge = {
+  siteKey: string;
+  action: string;
+};
+
+type ManagedTurnstileApi = {
+  render: (
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      action: string;
+      size: "invisible";
+      execution: "execute";
+      callback: (token: string) => void;
+      "error-callback": () => void;
+      "expired-callback": () => void;
+    },
+  ) => string | number;
+  execute: (widgetId: string | number) => void;
+  remove: (widgetId: string | number) => void;
+};
+
+type TurnstileWindow = Window & { turnstile?: ManagedTurnstileApi };
+
+let managedTurnstileScript: Promise<ManagedTurnstileApi> | null = null;
+
+function loadManagedTurnstile(): Promise<ManagedTurnstileApi> {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return Promise.reject(
+      new NamoIDError("Human verification requires a browser", {
+        code: "native_turnstile_unavailable",
+      }),
+    );
+  }
+  const browserWindow = window as TurnstileWindow;
+  if (browserWindow.turnstile) return Promise.resolve(browserWindow.turnstile);
+  if (managedTurnstileScript) return managedTurnstileScript;
+
+  managedTurnstileScript = new Promise<ManagedTurnstileApi>((resolve, reject) => {
+    const scriptId = "namoid-managed-turnstile";
+    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+    const script = existing ?? document.createElement("script");
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      const api = (window as TurnstileWindow).turnstile;
+      if (!api) {
+        settled = true;
+        managedTurnstileScript = null;
+        reject(
+          new NamoIDError("Human verification could not be loaded", {
+            code: "native_turnstile_unavailable",
+          }),
+        );
+        return;
+      }
+      settled = true;
+      resolve(api);
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      managedTurnstileScript = null;
+      reject(
+        new NamoIDError("Human verification could not be loaded", {
+          code: "native_turnstile_unavailable",
+        }),
+      );
+    };
+    script.addEventListener("load", finish, { once: true });
+    script.addEventListener("error", fail, { once: true });
+    if (!existing) {
+      script.id = scriptId;
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    window.setTimeout(() => {
+      if ((window as TurnstileWindow).turnstile) finish();
+      else fail();
+    }, 15_000);
+  });
+  return managedTurnstileScript;
+}
+
+async function getManagedTurnstileToken({
+  siteKey,
+  action,
+}: NamoIDTurnstileChallenge): Promise<string> {
+  const api = await loadManagedTurnstile();
+  const container = document.createElement("div");
+  container.setAttribute("aria-hidden", "true");
+  Object.assign(container.style, {
+    position: "fixed",
+    width: "1px",
+    height: "1px",
+    overflow: "hidden",
+    pointerEvents: "none",
+    opacity: "0",
+  });
+  document.body.appendChild(container);
+
+  return new Promise<string>((resolve, reject) => {
+    let widgetId: string | number | null = null;
+    let settled = false;
+    const cleanup = () => {
+      if (widgetId !== null) api.remove(widgetId);
+      container.remove();
+    };
+    const succeed = (token: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (token) resolve(token);
+      else {
+        reject(
+          new NamoIDError("Human verification did not return a token", {
+            code: "native_turnstile_unavailable",
+          }),
+        );
+      }
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(
+        new NamoIDError("Human verification could not be completed", {
+          code: "native_turnstile_unavailable",
+        }),
+      );
+    };
+    widgetId = api.render(container, {
+      sitekey: siteKey,
+      action,
+      size: "invisible",
+      execution: "execute",
+      callback: succeed,
+      "error-callback": fail,
+      "expired-callback": fail,
+    });
+    api.execute(widgetId);
+  });
+}
+
+export type UseNamoIDNativeEmailOtpOptions = {
+  redirectUri: string;
+  getTurnstileToken?: (challenge: NamoIDTurnstileChallenge) => Promise<string>;
+  onComplete: (result: CompletedHostedAuth) => void | Promise<void>;
+  onError?: (error: Error) => void;
+};
+
+export type UseNamoIDNativeEmailOtpState = {
+  config: NamoIDAuthConfig | null;
+  status: NamoIDNativeEmailOtpStatus;
+  error: Error | null;
+  ready: boolean;
+  email: string | null;
+  requestCode: (email: string) => Promise<void>;
+  verifyCode: (code: string) => Promise<void>;
+  reset: () => void;
+};
+
+type NativeEmailOtpAttempt = {
+  email: string;
+  flowToken: string;
+  transaction: OIDCTransaction;
+};
+
+/**
+ * Headless Test-preview controller for customer-DOM email OTP. It retains the
+ * OAuth transaction only in React memory and still completes through the
+ * standard authorization-code token endpoint.
+ */
+export function useNamoIDNativeEmailOtp({
+  redirectUri,
+  getTurnstileToken,
+  onComplete,
+  onError,
+}: UseNamoIDNativeEmailOtpOptions): UseNamoIDNativeEmailOtpState {
+  const client = useNamoID();
+  const { config, loading, error: configError } = useAuthConfig();
+  const [status, setStatus] = useState<NamoIDNativeEmailOtpStatus>("idle");
+  const [flowError, setFlowError] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState<NativeEmailOtpAttempt | null>(null);
+  const turnstileTokenProvider = getTurnstileToken ?? getManagedTurnstileToken;
+  const ready = Boolean(
+    !loading &&
+      !configError &&
+      redirectUri &&
+      hasNativeEmailOtp(config),
+  );
+  const fail = useCallback(
+    (value: unknown) => {
+      const error = value instanceof Error ? value : new Error("Sign-in failed");
+      setFlowError(error);
+      setStatus("error");
+      onError?.(error);
+    },
+    [onError],
+  );
+  const freshTurnstileToken = useCallback(
+    async (actionName: "start" | "email_otp_request") => {
+      if (!config?.turnstile_site_key) return undefined;
+      const action = config.native_auth_turnstile_actions[actionName];
+      if (!action) {
+        throw new NamoIDError("Human verification is not configured for native sign-in", {
+          code: "native_turnstile_unavailable",
+        });
+      }
+      return turnstileTokenProvider({ siteKey: config.turnstile_site_key, action });
+    },
+    [config, turnstileTokenProvider],
+  );
+  const requestCode = useCallback(
+    async (email: string) => {
+      if (!ready) return;
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) {
+        fail(new NamoIDError("Enter an email address", { code: "email_required" }));
+        return;
+      }
+      setFlowError(null);
+      setAttempt(null);
+      setStatus("requesting");
+      try {
+        const started = await client.nativeAuth.start({
+          redirectUri,
+          turnstileToken: await freshTurnstileToken("start"),
+        });
+        await client.nativeAuth.requestEmailOtp({
+          flowToken: started.flowToken,
+          email: normalizedEmail,
+          turnstileToken: await freshTurnstileToken("email_otp_request"),
+        });
+        setAttempt({
+          email: normalizedEmail,
+          flowToken: started.flowToken,
+          transaction: started.transaction,
+        });
+        setStatus("code_required");
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [client, fail, freshTurnstileToken, ready, redirectUri],
+  );
+  const verifyCode = useCallback(
+    async (code: string) => {
+      if (!attempt || status !== "code_required") return;
+      setFlowError(null);
+      setStatus("verifying");
+      try {
+        const authorization = await client.nativeAuth.verifyEmailOtp({
+          flowToken: attempt.flowToken,
+          email: attempt.email,
+          code: code.trim(),
+          transaction: attempt.transaction,
+        });
+        const completed = await completeAuthorizationCode(
+          client,
+          attempt.transaction,
+          authorization.code,
+        );
+        await onComplete(completed);
+        setAttempt(null);
+        setStatus("complete");
+      } catch (error) {
+        const verificationError =
+          error instanceof Error ? error : new Error("Sign-in failed");
+        setFlowError(verificationError);
+        setStatus("code_required");
+        onError?.(verificationError);
+      }
+    },
+    [attempt, client, onComplete, onError, status],
+  );
+  const reset = useCallback(() => {
+    setAttempt(null);
+    setFlowError(null);
+    setStatus("idle");
+  }, []);
+
+  return {
+    config,
+    status: loading ? "loading" : status,
+    error: configError ?? flowError,
+    ready,
+    email: attempt?.email ?? null,
+    requestCode,
+    verifyCode,
     reset,
   };
 }
@@ -251,27 +660,12 @@ export function NamoIDSignIn({
   const accent = appearance?.accent ?? auth.config?.brand_primary_color ?? "#0d684f";
   const radius = appearance?.radius ?? 14;
   const dark = useDarkAppearance(appearance?.theme, auth.config?.brand_dark_mode ?? false);
-  const colors = dark
-    ? {
-        surface: "#101814",
-        foreground: "#f7f8f6",
-        muted: "#aab5af",
-        border: "#33433b",
-        errorSurface: "#321a18",
-        errorBorder: "#85453e",
-        errorText: "#ffb4aa",
-      }
-    : {
-        surface: "#ffffff",
-        foreground: "#111111",
-        muted: "#62645f",
-        border: "#deded8",
-        errorSurface: "#fff4f2",
-        errorBorder: "#f0b4ae",
-        errorText: "#8f1d14",
-      };
+  const colors = signInPalette(dark);
   const statusLabel = signInStatusLabel(auth.status);
   const interactive = auth.ready && ["idle", "error"].includes(auth.status);
+  const configuredActions = configuredBrowserRedirectActions(auth.config);
+  const primaryAction = configuredActions[0];
+  const alternativeActions = configuredActions.slice(1);
   return (
     <section
       className={className}
@@ -317,7 +711,7 @@ export function NamoIDSignIn({
       <button
         type="button"
         disabled={!interactive}
-        onClick={() => void auth.signIn()}
+        onClick={() => void auth.signIn(primaryAction?.selection)}
         style={{
           ...styles.button,
           background: accent,
@@ -326,8 +720,258 @@ export function NamoIDSignIn({
           opacity: interactive ? 1 : 0.62,
         }}
       >
-        {statusLabel ?? buttonLabel}
+        {statusLabel ?? primaryAction?.label ?? buttonLabel}
       </button>
+      {alternativeActions.length > 0 ? (
+        <>
+          <div style={styles.signInDivider} aria-hidden="true">
+            <span style={{ ...styles.signInDividerLine, background: colors.border }} />
+            <span style={{ ...styles.signInDividerLabel, color: colors.muted }}>or</span>
+            <span style={{ ...styles.signInDividerLine, background: colors.border }} />
+          </div>
+          <div style={styles.socialProviderList}>
+            {alternativeActions.map((action) => (
+              <button
+                key={action.key}
+                type="button"
+                disabled={!interactive}
+                onClick={() => void auth.signIn(action.selection)}
+                style={{
+                  ...styles.socialProviderButton,
+                  borderColor: colors.border,
+                  color: colors.foreground,
+                  cursor: interactive ? "pointer" : "not-allowed",
+                  opacity: interactive ? 1 : 0.62,
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+      <p style={{ ...styles.securedBy, color: colors.muted }}>Secured by NamoID</p>
+    </section>
+  );
+}
+
+export type NamoIDNativeEmailOtpSignInProps = Omit<
+  UseNamoIDNativeEmailOtpOptions,
+  "getTurnstileToken"
+> & {
+  title?: string;
+  description?: string;
+  className?: string;
+  style?: CSSProperties;
+  appearance?: NamoIDSignInAppearance;
+  hostedFallback?: "popup" | "none";
+};
+
+/**
+ * Test-preview drop-in for native email OTP. Other configured methods remain
+ * visible and delegate to the verified Hosted Auth popup.
+ */
+export function NamoIDNativeEmailOtpSignIn({
+  title = "Sign in",
+  description = "Enter your email to receive a one-time code.",
+  className,
+  style,
+  appearance,
+  hostedFallback = "popup",
+  ...options
+}: NamoIDNativeEmailOtpSignInProps) {
+  const native = useNamoIDNativeEmailOtp(options);
+  const hosted = useNamoIDSignIn({
+    redirectUri: options.redirectUri,
+    fallback: "redirect",
+    onComplete: options.onComplete,
+    onError: options.onError,
+  });
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const accent = appearance?.accent ?? native.config?.brand_primary_color ?? "#0d684f";
+  const radius = appearance?.radius ?? 14;
+  const dark = useDarkAppearance(appearance?.theme, native.config?.brand_dark_mode ?? false);
+  const colors = signInPalette(dark);
+  const requesting = native.status === "requesting";
+  const verifying = native.status === "verifying";
+  const codeRequired = native.status === "code_required" || verifying;
+  const hostedInteractive = hosted.ready && ["idle", "error"].includes(hosted.status);
+  const hostedActions = configuredBrowserRedirectActions(
+    hosted.config,
+    new Set(["email_otp"]),
+  );
+  const showHostedMethods = hostedFallback === "popup" && hostedActions.length > 0;
+
+  return (
+    <section
+      className={className}
+      aria-busy={requesting || verifying}
+      style={{
+        ...styles.signInSurface,
+        borderRadius: radius,
+        fontFamily: appearance?.fontFamily,
+        background: colors.surface,
+        color: colors.foreground,
+        borderColor: colors.border,
+        ...style,
+      }}
+    >
+      {native.config?.brand_logo_url ? (
+        <img src={native.config.brand_logo_url} alt="" style={styles.brandLogo} />
+      ) : null}
+      <div style={styles.header}>
+        <h2 style={styles.signInTitle}>{title}</h2>
+        <p style={{ ...styles.description, color: colors.muted }}>
+          {codeRequired
+            ? `Enter the code sent to ${native.email ?? "your email"}.`
+            : description}
+        </p>
+      </div>
+      {native.error ? (
+        <div
+          role="alert"
+          style={{
+            ...styles.errorBox,
+            background: colors.errorSurface,
+            borderColor: colors.errorBorder,
+          }}
+        >
+          <p style={{ ...styles.error, color: colors.errorText }}>
+            {safeSignInError(native.error)}
+          </p>
+          <button
+            type="button"
+            onClick={native.reset}
+            style={{ ...styles.retryButton, color: colors.errorText }}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
+      {codeRequired ? (
+        <form
+          style={styles.nativeForm}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void native.verifyCode(code);
+          }}
+        >
+          <label style={styles.fieldLabel} htmlFor="namoid-native-email-code">
+            One-time code
+          </label>
+          <input
+            id="namoid-native-email-code"
+            value={code}
+            onChange={(event) => setCode(event.currentTarget.value)}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            required
+            disabled={verifying}
+            style={{
+              ...styles.textInput,
+              borderColor: colors.border,
+              color: colors.foreground,
+            }}
+          />
+          <button
+            type="submit"
+            disabled={verifying || !/^\d{6}$/.test(code)}
+            style={{
+              ...styles.button,
+              background: accent,
+              color: readableTextColor(accent),
+              opacity: verifying || !/^\d{6}$/.test(code) ? 0.62 : 1,
+            }}
+          >
+            {verifying ? "Verifying…" : "Verify code"}
+          </button>
+          <button
+            type="button"
+            disabled={verifying}
+            onClick={() => {
+              native.reset();
+              setCode("");
+            }}
+            style={{ ...styles.textButton, color: colors.muted }}
+          >
+            Use a different email
+          </button>
+        </form>
+      ) : (
+        <form
+          style={styles.nativeForm}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void native.requestCode(email);
+          }}
+        >
+          <label style={styles.fieldLabel} htmlFor="namoid-native-email">
+            Email
+          </label>
+          <input
+            id="namoid-native-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.currentTarget.value)}
+            autoComplete="email"
+            required
+            disabled={!native.ready || requesting}
+            style={{
+              ...styles.textInput,
+              borderColor: colors.border,
+              color: colors.foreground,
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!native.ready || requesting || !email.trim()}
+            style={{
+              ...styles.button,
+              background: accent,
+              color: readableTextColor(accent),
+              opacity: !native.ready || requesting || !email.trim() ? 0.62 : 1,
+            }}
+          >
+            {requesting ? "Sending code…" : "Continue with email"}
+          </button>
+          {!native.ready && native.status !== "loading" ? (
+            <p style={{ ...styles.meta, color: colors.muted }}>
+              Native email sign-in is unavailable for this application. Use a secure hosted
+              method below.
+            </p>
+          ) : null}
+        </form>
+      )}
+      {showHostedMethods ? (
+        <>
+          <div style={styles.signInDivider} aria-hidden="true">
+            <span style={{ ...styles.signInDividerLine, background: colors.border }} />
+            <span style={{ ...styles.signInDividerLabel, color: colors.muted }}>or</span>
+            <span style={{ ...styles.signInDividerLine, background: colors.border }} />
+          </div>
+          <div style={styles.socialProviderList}>
+            {hostedActions.map((action) => (
+              <button
+                key={action.key}
+                type="button"
+                disabled={!hostedInteractive}
+                onClick={() => void hosted.signIn(action.selection)}
+                style={{
+                  ...styles.socialProviderButton,
+                  borderColor: colors.border,
+                  color: colors.foreground,
+                  opacity: hostedInteractive ? 1 : 0.62,
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
       <p style={{ ...styles.securedBy, color: colors.muted }}>Secured by NamoID</p>
     </section>
   );
@@ -382,7 +1026,6 @@ export type HostedAuthPopupButtonProps = HostedAuthButtonProps & {
 
 export function HostedAuthPopupButton({
   redirectUri,
-  scopes,
   prompt,
   timeoutMs,
   onSuccess,
@@ -399,7 +1042,6 @@ export function HostedAuthPopupButton({
     try {
       const authorization = await client.hostedAuth.popup({
         redirectUri,
-        scopes,
         prompt,
         timeoutMs,
       });
@@ -568,7 +1210,13 @@ function transactionStorageKey(clientId: string): string {
 
 async function startHostedAuthRedirect(
   client: NamoIDClient,
-  options: Pick<HostedAuthButtonProps, "redirectUri" | "scopes" | "prompt">,
+  options: Pick<
+    StartAuthorizationOptions,
+    | "redirectUri"
+    | "prompt"
+    | "identityProvider"
+    | "authenticationMethod"
+  >,
 ): Promise<void> {
   const started = await client.hostedAuth.start(options);
   sessionStorage.setItem(
@@ -639,6 +1287,28 @@ function readableTextColor(color: string): "#111111" | "#ffffff" {
   return whiteContrast >= darkContrast ? "#ffffff" : "#111111";
 }
 
+function signInPalette(dark: boolean) {
+  return dark
+    ? {
+        surface: "#101814",
+        foreground: "#f7f8f6",
+        muted: "#aab5af",
+        border: "#33433b",
+        errorSurface: "#321a18",
+        errorBorder: "#85453e",
+        errorText: "#ffb4aa",
+      }
+    : {
+        surface: "#ffffff",
+        foreground: "#111111",
+        muted: "#62645f",
+        border: "#deded8",
+        errorSurface: "#fff4f2",
+        errorBorder: "#f0b4ae",
+        errorText: "#8f1d14",
+      };
+}
+
 const styles: Record<string, CSSProperties> = {
   card: {
     border: "1px solid #deded8",
@@ -695,6 +1365,42 @@ const styles: Record<string, CSSProperties> = {
     boxShadow: "0 20px 55px rgba(17, 24, 21, 0.12)",
   },
   signInTitle: { margin: 0, fontSize: 24, lineHeight: 1.2, fontWeight: 700 },
+  signInDivider: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
+    alignItems: "center",
+    gap: 10,
+  },
+  signInDividerLine: { display: "block", height: 1 },
+  signInDividerLabel: { fontSize: 12, lineHeight: 1 },
+  socialProviderList: { display: "grid", gap: 10 },
+  socialProviderButton: {
+    border: "1px solid #deded8",
+    borderRadius: 6,
+    padding: "10px 14px",
+    background: "transparent",
+    fontSize: 14,
+    fontWeight: 650,
+  },
+  nativeForm: { display: "grid", gap: 10 },
+  fieldLabel: { fontSize: 13, lineHeight: 1.3, fontWeight: 650 },
+  textInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #deded8",
+    borderRadius: 6,
+    padding: "11px 12px",
+    background: "transparent",
+    fontSize: 16,
+    lineHeight: 1.4,
+  },
+  textButton: {
+    border: 0,
+    padding: "4px 0",
+    background: "transparent",
+    fontSize: 13,
+    cursor: "pointer",
+  },
   brandLogo: { display: "block", width: 44, height: 44, objectFit: "contain" },
   securedBy: {
     margin: 0,
