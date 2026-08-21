@@ -1,0 +1,39 @@
+{
+  "name": "@namoidhq/agent-auth",
+  "version": "0.1.0-preview.0",
+  "description": "Server-side SDK for NamoID customer Agent Auth, User connections, and bounded MCP sessions.",
+  "keywords": ["namoid", "agent-auth", "mcp", "oauth", "connectors"],
+  "homepage": "https://namoid.in",
+  "bugs": {
+    "url": "https://github.com/namoidhq/namoid-js/issues",
+    "email": "hello@namoid.in"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/namoidhq/namoid-js.git",
+    "directory": "packages/agent-auth"
+  },
+  "license": "MIT",
+  "author": "PolyMindsLabs Pvt. Ltd. <hello@namoid.in> (https://namoid.in)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "publishConfig": { "access": "public" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
