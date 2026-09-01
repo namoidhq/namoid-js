@@ -210,7 +210,11 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
         });
       }
       const postLogoutRedirectUri =
-        logoutOptions.postLogoutRedirectUri ?? absoluteUrl(appBaseUrl, postLogoutRedirectPath);
+        safeAppRedirect(
+          appBaseUrl,
+          logoutOptions.postLogoutRedirectUri ?? postLogoutRedirectPath,
+          "postLogoutRedirectUri",
+        );
       if (logoutOptions.clearHostedSession !== false && logoutOptions.idTokenHint) {
         return redirectResponse(
           await oidc.hostedAuth.getLogoutUrl({
@@ -269,7 +273,8 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
         code: "missing_oidc_transaction",
       });
     }
-    if (Date.now() - createdAt > transactionMaxAgeSeconds * 1000) {
+    const age = Date.now() - createdAt;
+    if (age < -60_000 || age > transactionMaxAgeSeconds * 1000) {
       throw new NamoIDError("Authorization transaction expired", {
         code: "expired_oidc_transaction",
       });
@@ -387,6 +392,16 @@ function absoluteUrl(baseUrl: string, pathOrUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
   const normalizedPath = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
   return new URL(normalizedPath, `${baseUrl}/`).toString();
+}
+
+function safeAppRedirect(baseUrl: string, pathOrUrl: string, field: string): string {
+  const resolved = absoluteUrl(baseUrl, pathOrUrl);
+  if (new URL(resolved).origin !== new URL(baseUrl).origin) {
+    throw new NamoIDError(`${field} must use the application origin`, {
+      code: "unsafe_redirect_uri",
+    });
+  }
+  return resolved;
 }
 
 function withQuery(urlValue: string, key: string, value: string): string {

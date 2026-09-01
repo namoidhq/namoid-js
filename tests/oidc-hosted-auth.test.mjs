@@ -608,6 +608,42 @@ test("Next.js logout revokes the app grant and uses RP-initiated logout", async 
   assert.equal(url.pathname === "/sign-out", false);
 });
 
+test("Next.js rejects external logout redirects and future transactions", async () => {
+  const client = createNamoIDNextClient({
+    clientId,
+    clientSecret,
+    appBaseUrl: "https://app.example.com",
+    fetcher: async (request) => {
+      const metadata = metadataResponse(new URL(request));
+      if (metadata) return metadata;
+      throw new Error(`Unexpected request: ${request}`);
+    },
+  });
+
+  await assert.rejects(
+    client.logout({
+      clearHostedSession: false,
+      postLogoutRedirectUri: "https://attacker.example/phish",
+    }),
+    (error) => error.code === "unsafe_redirect_uri",
+  );
+
+  const transaction = {
+    state: "state",
+    nonce: "nonce",
+    codeVerifier: "v".repeat(64),
+    redirectUri: "https://app.example.com/api/auth/callback/namoid",
+    returnTo: "/",
+    createdAt: Date.now() + 120_000,
+  };
+  assert.throws(
+    () => client.readTransaction(new Request("https://app.example.com/callback", {
+      headers: { cookie: transactionCookie(transaction) },
+    })),
+    (error) => error.code === "expired_oidc_transaction",
+  );
+});
+
 function transactionCookie(transaction) {
   return [
     ["namoid_state", transaction.state],
