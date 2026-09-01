@@ -18,6 +18,12 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/agent-auth:
+    devDependencies:
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/js:
     dependencies:
       jose:

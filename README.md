@@ -1,5 +1,9 @@
 # NamoID JavaScript SDKs
 
+This monorepo includes the server-only `@namoidhq/agent-auth` package for
+customer-facing connectors and bounded MCP sessions alongside the Customer
+Identity SDKs.
+
 [![@namoidhq/js](https://img.shields.io/npm/v/@namoidhq/js.svg?label=%40namoidhq%2Fjs)](https://www.npmjs.com/package/@namoidhq/js)
 [![@namoidhq/react](https://img.shields.io/npm/v/@namoidhq/react.svg?label=%40namoidhq%2Freact)](https://www.npmjs.com/package/@namoidhq/react)
 [![@namoidhq/nextjs](https://img.shields.io/npm/v/@namoidhq/nextjs.svg?label=%40namoidhq%2Fnextjs)](https://www.npmjs.com/package/@namoidhq/nextjs)
