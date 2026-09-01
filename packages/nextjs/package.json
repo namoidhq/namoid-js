@@ -1,6 +1,6 @@
 {
   "name": "@namoidhq/nextjs",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Next.js SDK for NamoID Hosted Auth using OIDC Authorization Code with PKCE, secure callbacks, refresh, and logout.",
   "keywords": [
     "namoid",
