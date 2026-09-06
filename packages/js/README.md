@@ -136,7 +136,64 @@ Social login, passkeys, MFA, waitlists, custom registration fields, and mobile
 native clients continue through Hosted Auth. Do not store bearer or refresh
 tokens in browser storage.
 
+## Consent-aware authentication analytics
+
+After a successful callback, NamoID can expose one minimized `login` or
+`sign_up` event. The SDK does not load an analytics vendor and does not decide
+consent. Consume the event only after your application has established its
+session:
+
+```ts
+await namoid.consumeAuthAnalyticsEvent(async (event) => {
+  if (!analyticsConsentGranted()) return;
+
+  gtag("event", event.name, {
+    method: event.method,
+  });
+});
+```
+
+The SDK marks the event consumed before invoking the handler, preventing
+duplicate delivery after refreshes or React Strict Mode. The event contains an
+opaque event ID, method, application ID, Instance ID, and timestamp. It never
+contains a user ID, workspace ID, email, phone number, or profile data. Handler
+failures do not invalidate the authenticated session.
+
 Docs: <https://docs.namoid.in> · Contact: hello@namoid.in
+
+## Server-side Management API
+
+`NamoIDManagement` is exported only from `@namoidhq/js/server`. Use a Management Client created
+for the exact Instance; never expose its secret to browser, mobile, desktop, or edge-rendered
+client code.
+
+```ts
+import { NamoIDManagement } from "@namoidhq/js/server";
+
+const namoid = new NamoIDManagement({
+  issuer: process.env.NAMOID_ISSUER!,
+  instanceId: process.env.NAMOID_INSTANCE_ID!,
+  clientId: process.env.NAMOID_MANAGEMENT_CLIENT_ID!,
+  clientSecret: process.env.NAMOID_MANAGEMENT_CLIENT_SECRET!,
+});
+
+const firstPage = await namoid.users.list({ limit: 100 });
+const user = await namoid.users.get(firstPage.data[0].id);
+
+for await (const users of namoid.users.pages({ limit: 100 })) {
+  // Reconcile one bounded page at a time.
+}
+```
+
+The SDK obtains five-minute OAuth Client Credentials tokens, caches them only in memory, merges
+concurrent token requests, follows opaque pagination cursors, retries one safe read after a `401`,
+and exposes request IDs through `NamoIDManagementError`. The current public Management API supports
+`users:read`; additional resources will be added as their machine scopes and gateway contracts are
+released.
+
+Authentication Hook configuration is intentionally not included yet: those endpoints currently
+require an interactive Console administrator. A future SDK addition requires dedicated machine
+scopes and isolated Management gateway routes first.
 
 ## License
 

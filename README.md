@@ -19,6 +19,10 @@ The JavaScript/TypeScript SDKs for [NamoID](https://namoid.in) Hosted Auth. The 
 | [`@namoidhq/react`](./packages/react) | `@namoidhq/react` | React provider, sign-in component, and public-client callback validation |
 | [`@namoidhq/nextjs`](./packages/nextjs) | `@namoidhq/nextjs` | Confidential BFF adapter — secure transaction cookies, callback validation, refresh, revocation, and RP logout |
 
+`@namoidhq/js/server` also exports the server-only `NamoIDManagement` client for the isolated
+Management API. Its current release supports Instance user listing and lookup through OAuth Client
+Credentials. See [the Management SDK scope](./docs/management-sdk-scope.md).
+
 Future framework adapters (`@namoidhq/vue`, `@namoidhq/svelte`, …) go in this same repo under `packages/`.
 
 ## Install

@@ -169,6 +169,16 @@ export type RevokeTokenOptions = {
   clientSecret?: string;
 };
 
+/** A privacy-minimized, one-time authentication outcome for customer analytics. */
+export type AuthAnalyticsEvent = {
+  id: string;
+  name: "login" | "sign_up";
+  method: string;
+  applicationId: string;
+  instanceId: string;
+  occurredAt: string;
+};
+
 export type LogoutUrlOptions = {
   idTokenHint: string;
   postLogoutRedirectUri?: string;
@@ -182,8 +192,13 @@ export type NamoIDTokenResponse = {
   refresh_token?: string;
   id_token?: string;
   scope?: string;
+  /** Present only after a successful authorization-code exchange. */
+  analyticsEvent?: AuthAnalyticsEvent;
   [claim: string]: unknown;
 };
+
+/** Successful callback result, including an optional one-time analytics event. */
+export type AuthCallbackResult = NamoIDTokenResponse;
 
 export type NamoIDUserInfo = {
   sub: string;
@@ -230,6 +245,10 @@ export type NamoIDClient = {
       options: NativeEmailOtpVerifyOptions,
     ) => Promise<NativeAuthorizationResult>;
   };
+  /** Consume the pending authentication analytics event at most once in this browser tab. */
+  consumeAuthAnalyticsEvent: (
+    handler: (event: AuthAnalyticsEvent) => void | Promise<void>,
+  ) => Promise<boolean>;
 };
 
 export class NamoIDError extends Error {
@@ -251,6 +270,9 @@ export class NamoIDError extends Error {
 
 const DEFAULT_API_BASE_URL = "https://api.namoid.in";
 const DEFAULT_IDENTITY_SCOPES = ["openid", "profile", "email"];
+const AUTH_ANALYTICS_PENDING_PREFIX = "namoid:auth-analytics:pending:";
+const AUTH_ANALYTICS_CONSUMED_PREFIX = "namoid:auth-analytics:consumed:";
+const AUTH_ANALYTICS_PENDING_TTL_MS = 10 * 60 * 1_000;
 
 export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
   if (!options.clientId) {
@@ -367,13 +389,18 @@ export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
         }
       },
       createTransaction,
-      exchangeCode: async (exchangeOptions) =>
-        exchangeAuthorizationCode({
+      exchangeCode: async (exchangeOptions) => {
+        const tokens = await exchangeAuthorizationCode({
           ...exchangeOptions,
           clientId: options.clientId,
           discovery: await getDiscovery(),
           fetcher,
-        }),
+        });
+        if (tokens.analyticsEvent) {
+          rememberAuthAnalyticsEvent(options.clientId, tokens.analyticsEvent);
+        }
+        return tokens;
+      },
       refresh: async (refreshOptions) =>
         refreshOIDCTokens({
           ...refreshOptions,
@@ -482,6 +509,8 @@ export function createNamoIDClient(options: NamoIDClientOptions): NamoIDClient {
         };
       },
     },
+    consumeAuthAnalyticsEvent: (handler) =>
+      consumeStoredAuthAnalyticsEvent(options.clientId, handler),
   };
 }
 
@@ -951,7 +980,115 @@ async function tokenRequest(options: {
       detail: body,
     });
   }
-  return (await response.json()) as NamoIDTokenResponse;
+  const payload = (await response.json()) as NamoIDTokenResponse & {
+    namoid_auth_event?: unknown;
+  };
+  const analyticsEvent = parseAuthAnalyticsEvent(payload.namoid_auth_event);
+  delete payload.namoid_auth_event;
+  if (analyticsEvent) payload.analyticsEvent = analyticsEvent;
+  return payload;
+}
+
+function parseAuthAnalyticsEvent(value: unknown): AuthAnalyticsEvent | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const event = value as Record<string, unknown>;
+  if (
+    typeof event.id !== "string" ||
+    (event.name !== "login" && event.name !== "sign_up") ||
+    typeof event.method !== "string" ||
+    typeof event.application_id !== "string" ||
+    typeof event.instance_id !== "string" ||
+    typeof event.occurred_at !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    id: event.id,
+    name: event.name,
+    method: event.method,
+    applicationId: event.application_id,
+    instanceId: event.instance_id,
+    occurredAt: event.occurred_at,
+  };
+}
+
+function authAnalyticsStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function rememberAuthAnalyticsEvent(clientId: string, event: AuthAnalyticsEvent): void {
+  const storage = authAnalyticsStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(
+      `${AUTH_ANALYTICS_PENDING_PREFIX}${clientId}`,
+      JSON.stringify({ event, expiresAt: Date.now() + AUTH_ANALYTICS_PENDING_TTL_MS }),
+    );
+  } catch {
+    // Analytics storage must never affect a successful authenticated session.
+  }
+}
+
+async function consumeStoredAuthAnalyticsEvent(
+  clientId: string,
+  handler: (event: AuthAnalyticsEvent) => void | Promise<void>,
+): Promise<boolean> {
+  const storage = authAnalyticsStorage();
+  if (!storage) return false;
+  const pendingKey = `${AUTH_ANALYTICS_PENDING_PREFIX}${clientId}`;
+  const consumedKey = `${AUTH_ANALYTICS_CONSUMED_PREFIX}${clientId}`;
+  let event: AuthAnalyticsEvent | undefined;
+  try {
+    const serialized = storage.getItem(pendingKey);
+    event = serialized ? parseStoredAuthAnalyticsEvent(serialized) : undefined;
+    if (!event || storage.getItem(consumedKey) === event.id) {
+      storage.removeItem(pendingKey);
+      return false;
+    }
+    // Mark first so refreshes, React Strict Mode, and handler retries cannot duplicate delivery.
+    storage.setItem(consumedKey, event.id);
+    storage.removeItem(pendingKey);
+  } catch {
+    return false;
+  }
+  await handler(event);
+  return true;
+}
+
+function parseStoredAuthAnalyticsEvent(serialized: string): AuthAnalyticsEvent | undefined {
+  try {
+    const stored = JSON.parse(serialized) as {
+      event?: Partial<AuthAnalyticsEvent>;
+      expiresAt?: unknown;
+    };
+    if (
+      typeof stored.expiresAt !== "number" ||
+      !Number.isFinite(stored.expiresAt) ||
+      stored.expiresAt <= Date.now()
+    ) {
+      return undefined;
+    }
+    const event = stored.event;
+    if (
+      !event ||
+      typeof event.id !== "string" ||
+      (event.name !== "login" && event.name !== "sign_up") ||
+      typeof event.method !== "string" ||
+      typeof event.applicationId !== "string" ||
+      typeof event.instanceId !== "string" ||
+      typeof event.occurredAt !== "string"
+    ) {
+      return undefined;
+    }
+    return event as AuthAnalyticsEvent;
+  } catch {
+    return undefined;
+  }
 }
 
 function tokenClientHeaders(clientId: string, clientSecret?: string): Record<string, string> {

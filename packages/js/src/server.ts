@@ -2,6 +2,8 @@ import { decodeProtectedHeader, importJWK, jwtVerify, type JWTPayload, type JWK 
 
 import { NamoIDError, type OIDCDiscoveryDocument } from "./index.js";
 
+export * from "./management.js";
+
 export type ValidatedIDToken = JWTPayload & {
   sub: string;
   nonce: string;

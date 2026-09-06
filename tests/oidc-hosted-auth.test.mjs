@@ -213,6 +213,144 @@ test("browser client can select each configured hosted local ceremony", async ()
   }
 });
 
+test("browser client exposes and consumes a privacy-safe auth analytics event once", async () => {
+  const values = new Map();
+  const sessionStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+  };
+  const previousWindow = globalThis.window;
+  globalThis.window = { sessionStorage };
+  try {
+    const namoid = createNamoIDClient({
+      clientId,
+      fetcher: async (request) => {
+        const url = new URL(request);
+        const metadata = metadataResponse(url);
+        if (metadata) return metadata;
+        if (url.pathname === "/v1/oauth/token") {
+          return Response.json({
+            access_token: "access",
+            token_type: "Bearer",
+            namoid_auth_event: {
+              id: "journey-1",
+              name: "login",
+              method: "passkey",
+              application_id: "application-1",
+              instance_id: "namoid_ins_test_example",
+              occurred_at: "2026-09-03T12:00:00Z",
+            },
+          });
+        }
+        throw new Error(`Unexpected request: ${request}`);
+      },
+    });
+
+    const tokens = await namoid.hostedAuth.exchangeCode({
+      code: "code",
+      redirectUri,
+      codeVerifier: "v".repeat(64),
+      clientSecret,
+    });
+    assert.deepEqual(tokens.analyticsEvent, {
+      id: "journey-1",
+      name: "login",
+      method: "passkey",
+      applicationId: "application-1",
+      instanceId: "namoid_ins_test_example",
+      occurredAt: "2026-09-03T12:00:00Z",
+    });
+    assert.equal("namoid_auth_event" in tokens, false);
+
+    const delivered = [];
+    assert.equal(
+      await namoid.consumeAuthAnalyticsEvent((event) => delivered.push(event)),
+      true,
+    );
+    assert.equal(await namoid.consumeAuthAnalyticsEvent(() => {}), false);
+    assert.equal(delivered.length, 1);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test("auth analytics handler failure cannot make the same event deliver twice", async () => {
+  const values = new Map([
+    [
+      `namoid:auth-analytics:pending:${clientId}`,
+      JSON.stringify({
+        event: {
+          id: "journey-handler-error",
+          name: "sign_up",
+          method: "email_otp",
+          applicationId: "application-1",
+          instanceId: "namoid_ins_test_example",
+          occurredAt: "2026-09-03T12:00:00Z",
+        },
+        expiresAt: Date.now() + 60_000,
+      }),
+    ],
+  ]);
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    sessionStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    },
+  };
+  try {
+    const namoid = createNamoIDClient({ clientId, fetcher: async () => new Response() });
+    await assert.rejects(
+      namoid.consumeAuthAnalyticsEvent(() => {
+        throw new Error("vendor unavailable");
+      }),
+      /vendor unavailable/,
+    );
+    assert.equal(await namoid.consumeAuthAnalyticsEvent(() => {}), false);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test("expired auth analytics events are discarded without delivery", async () => {
+  const values = new Map([
+    [
+      `namoid:auth-analytics:pending:${clientId}`,
+      JSON.stringify({
+        event: {
+          id: "journey-expired",
+          name: "login",
+          method: "password",
+          applicationId: "application-1",
+          instanceId: "namoid_ins_test_example",
+          occurredAt: "2026-09-03T12:00:00Z",
+        },
+        expiresAt: Date.now() - 1,
+      }),
+    ],
+  ]);
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    sessionStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    },
+  };
+  try {
+    const namoid = createNamoIDClient({ clientId, fetcher: async () => new Response() });
+    assert.equal(await namoid.consumeAuthAnalyticsEvent(() => assert.fail("must not run")), false);
+    assert.equal(values.has(`namoid:auth-analytics:pending:${clientId}`), false);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 test("native email OTP remains bound to the standard OIDC transaction", async () => {
   const requests = [];
   let nativeState;
