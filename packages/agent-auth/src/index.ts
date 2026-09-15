@@ -27,14 +27,29 @@ export type NamoIDAgentAuthOptions = {
   timeoutMs?: number;
 };
 
-export type AgentAuthUserContext = {
-  accessToken: string;
+export type AgentAuthUserContext =
+  | { accessToken: string; identityContextToken?: never }
+  | { identityContextToken: string; accessToken?: never };
+
+export type ExternalSubject = { identitySourceId: string; subject: string };
+export type ExternalSession = ExternalSubject & { sessionReference: string };
+export type CreateIdentityContextInput = ExternalSession & {
+  expiresIn?: number;
+  sessionExpiresAt?: string;
+};
+export type IdentityContext = {
+  id: string;
+  principalId: string;
+  identitySourceId: string;
+  token: string;
+  expiresIn: number;
+  expiresAt: string;
+  toJSON(): Record<string, unknown>;
 };
 
 export type AgentAuthRequestOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
-  idempotencyKey?: string;
 };
 
 export type CreateUserConnectionInput = {
@@ -72,6 +87,7 @@ export type CreateMcpSessionInput = {
    * the user has exactly one compatible active User connection.
    */
   userConnectionId?: string;
+  userConnectionIds?: string[];
 };
 
 export type McpConnectionDescriptor = {
@@ -84,7 +100,8 @@ export type McpSession = {
   id: string;
   gatewayId: string;
   gatewayRevisionId: string;
-  userConnectionId: string;
+  /** Null when the custom MCP server requires no upstream authentication. */
+  userConnectionId: string | null;
   status: string;
   expiresAt: string;
   revokedAt: string | null;
@@ -134,7 +151,7 @@ type ApiMcpSession = {
   id: string;
   gateway_id: string;
   gateway_revision_id: string;
-  connected_account_id: string;
+  connected_account_id: string | null;
   status: string;
   expires_at: string;
   revoked_at: string | null;
@@ -187,6 +204,17 @@ export class NamoIDAgentAuthError extends Error {
 }
 
 export class NamoIDAgentAuth {
+  readonly identityContexts: {
+    /** Call only after verifying the current session on your own backend. */
+    create: (input: CreateIdentityContextInput, options?: AgentAuthRequestOptions) => Promise<IdentityContext>;
+    revoke: (id: string, options?: AgentAuthRequestOptions) => Promise<void>;
+  };
+  readonly externalSessions: {
+    revoke: (input: ExternalSession, options?: AgentAuthRequestOptions) => Promise<void>;
+  };
+  readonly externalPrincipals: {
+    suspend: (input: ExternalSubject, options?: AgentAuthRequestOptions) => Promise<void>;
+  };
   readonly userConnections: {
     create: (
       input: CreateUserConnectionInput,
@@ -240,6 +268,45 @@ export class NamoIDAgentAuth {
       throw sdkError("fetch is unavailable; pass the fetch option", "invalid_configuration");
     }
     this.#timeoutMs = positiveTimeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+
+    this.identityContexts = {
+      create: async (input, requestOptions) => {
+        const fields = externalSessionBody(input);
+        if (input.expiresIn !== undefined && (!Number.isInteger(input.expiresIn) || input.expiresIn < 2 || input.expiresIn > 300)) {
+          throw sdkError("expiresIn must be an integer between 2 and 300", "invalid_configuration");
+        }
+        if (input.sessionExpiresAt !== undefined && (!Number.isFinite(Date.parse(input.sessionExpiresAt)) || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(input.sessionExpiresAt))) {
+          throw sdkError("sessionExpiresAt must be an ISO timestamp with a timezone", "invalid_configuration");
+        }
+        const body = await this.#request<Record<string, unknown>>("POST", "/v1/agent-auth/identity-contexts", null, {
+          ...fields,
+          ...(input.expiresIn !== undefined ? { expires_in: input.expiresIn } : {}),
+          ...(input.sessionExpiresAt !== undefined ? { session_expires_at: input.sessionExpiresAt } : {}),
+        }, requestOptions);
+        if (!isRecord(body) || !hasStrings(body, ["id", "principal_id", "identity_source_id", "token", "expires_at"]) ||
+            typeof body.expires_in !== "number" || body.expires_in < 0 || body.expires_in > 300 ||
+            !String(body.token).startsWith("namoid_agent_identity_") || !Number.isFinite(Date.parse(String(body.expires_at)))) throw invalidResponse();
+        const context = {
+          id: String(body.id), principalId: String(body.principal_id), identitySourceId: String(body.identity_source_id),
+          token: String(body.token), expiresIn: body.expires_in, expiresAt: String(body.expires_at),
+        };
+        return Object.assign(context, { toJSON: () => ({ ...context, token: REDACTED, toJSON: undefined }) });
+      },
+      revoke: async (id, requestOptions) => {
+        requiredId(id, "identityContextId");
+        await this.#request<void>("POST", `/v1/agent-auth/identity-contexts/${encodeURIComponent(id)}/revoke`, null, undefined, requestOptions);
+      },
+    };
+    this.externalSessions = {
+      revoke: async (input, requestOptions) => {
+        await this.#request<void>("POST", "/v1/agent-auth/external-sessions/revoke", null, externalSessionBody(input), requestOptions);
+      },
+    };
+    this.externalPrincipals = {
+      suspend: async (input, requestOptions) => {
+        await this.#request<void>("POST", "/v1/agent-auth/external-principals/suspend", null, externalSubjectBody(input), requestOptions);
+      },
+    };
 
     this.userConnections = {
       create: async (input, user, requestOptions) => {
@@ -304,12 +371,17 @@ export class NamoIDAgentAuth {
         if (input.userConnectionId !== undefined) {
           requiredId(input.userConnectionId, "userConnectionId");
         }
+        if (input.userConnectionIds !== undefined) {
+          if (!Array.isArray(input.userConnectionIds) || input.userConnectionIds.length > 20) throw sdkError("Select at most 20 user connections", "invalid_configuration");
+          input.userConnectionIds.forEach((id) => requiredId(id, "userConnectionId"));
+        }
         const body = await this.#request<ApiCreatedMcpSession>(
           "POST",
           "/v1/agent-auth/mcp-sessions",
           user,
           {
             gateway_id: input.gatewayId,
+            ...(input.userConnectionIds ? { connected_account_ids: input.userConnectionIds } : {}),
             ...(input.userConnectionId
               ? { connected_account_id: input.userConnectionId }
               : {}),
@@ -335,11 +407,20 @@ export class NamoIDAgentAuth {
   async #request<T>(
     method: "GET" | "POST",
     path: string,
-    user: AgentAuthUserContext,
+    user: AgentAuthUserContext | null,
     body?: Record<string, unknown>,
     options: AgentAuthRequestOptions = {},
   ): Promise<T> {
-    const accessToken = requiredSecret(user?.accessToken, "user accessToken");
+    let accessToken: string | null = null;
+    if (user !== null) {
+      if (!user || (user.accessToken !== undefined) === (user.identityContextToken !== undefined)) {
+        throw sdkError("Provide exactly one accessToken or identityContextToken", "invalid_user_assertion");
+      }
+      accessToken = requiredSecret(user.accessToken ?? user.identityContextToken, "user token");
+      if (user.identityContextToken !== undefined && !accessToken.startsWith("namoid_agent_identity_")) {
+        throw sdkError("Invalid identityContextToken", "invalid_user_assertion");
+      }
+    }
     const controller = new AbortController();
     let timedOut = false;
     const timeoutMs = positiveTimeout(options.timeoutMs ?? this.#timeoutMs);
@@ -359,16 +440,14 @@ export class NamoIDAgentAuth {
           "content-type": "application/json",
           "x-namoid-client-id": this.#clientId,
           "x-namoid-client-secret": this.#clientSecret,
-          authorization: `Bearer ${accessToken}`,
-          ...(options.idempotencyKey
-            ? { "idempotency-key": requiredSecret(options.idempotencyKey, "idempotencyKey") }
-            : {}),
+          ...(accessToken === null ? {} : { authorization: `Bearer ${accessToken}` }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
         cache: "no-store",
       });
-      if (!response.ok) throw await responseError(response);
+      if (!response.ok) throw await responseError(response, method);
+      if (response.status === 204) return undefined as T;
       try {
         return (await response.json()) as T;
       } catch (cause) {
@@ -435,11 +514,11 @@ function mapMcpSession(body: ApiMcpSession): McpSession {
       "id",
       "gateway_id",
       "gateway_revision_id",
-      "connected_account_id",
       "status",
       "expires_at",
       "created_at",
     ]) ||
+    !isNullableString(body.connected_account_id) ||
     !isNullableString(body.revoked_at) ||
     !isNullableString(body.revoked_reason)
   ) {
@@ -484,7 +563,10 @@ function createMcpSession(body: ApiCreatedMcpSession, baseUrl: URL): CreatedMcpS
   };
 }
 
-async function responseError(response: Response): Promise<NamoIDAgentAuthError> {
+async function responseError(
+  response: Response,
+  method: "GET" | "POST",
+): Promise<NamoIDAgentAuthError> {
   let body: ApiErrorBody = {};
   try {
     body = (await response.json()) as ApiErrorBody;
@@ -501,7 +583,7 @@ async function responseError(response: Response): Promise<NamoIDAgentAuthError> 
     code,
     status: response.status,
     requestId: response.headers.get("x-request-id") ?? undefined,
-    retryable: response.status === 429 || response.status >= 500,
+    retryable: method === "GET" && (response.status === 429 || response.status >= 500),
     details: safeDetails(body.detail),
   });
 }
@@ -642,4 +724,21 @@ function resolveApiUrl(baseUrl: URL, value: string): string {
 
 function sdkError(message: string, code: AgentAuthErrorCode): NamoIDAgentAuthError {
   return new NamoIDAgentAuthError(message, { code });
+}
+
+
+function opaqueIdentifier(value: string, name: string): string {
+  if (typeof value !== "string" || !value.trim() || [...value].length > 512 || /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u.test(value)) {
+    throw sdkError(`${name} must be a nonempty identifier without control characters (max 512 characters)`, "invalid_configuration");
+  }
+  return value;
+}
+
+function externalSubjectBody(input: ExternalSubject): Record<string, unknown> {
+  requiredId(input.identitySourceId, "identitySourceId");
+  return { identity_source_id: input.identitySourceId, subject: opaqueIdentifier(input.subject, "subject") };
+}
+
+function externalSessionBody(input: ExternalSession): Record<string, unknown> {
+  return { ...externalSubjectBody(input), session_reference: opaqueIdentifier(input.sessionReference, "sessionReference") };
 }

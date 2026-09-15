@@ -75,6 +75,149 @@ export function useAuthConfig(): UseAuthConfigState {
   return { config, loading, error, reload };
 }
 
+type GoogleCredentialResponse = { credential?: string };
+type GoogleIdentityApi = {
+  accounts: {
+    id: {
+      initialize: (options: {
+        client_id: string;
+        nonce: string;
+        auto_select: boolean;
+        context: "signin" | "signup" | "use";
+        callback: (response: GoogleCredentialResponse) => void;
+      }) => void;
+      prompt: () => void;
+      cancel: () => void;
+    };
+  };
+};
+
+let googleIdentityScriptPromise: Promise<GoogleIdentityApi> | null = null;
+
+function loadGoogleIdentityServices(): Promise<GoogleIdentityApi> {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Google One Tap requires a browser"));
+  }
+  const existing = (window as Window & { google?: GoogleIdentityApi }).google;
+  if (existing?.accounts.id) return Promise.resolve(existing);
+  googleIdentityScriptPromise ??= new Promise<GoogleIdentityApi>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.onload = () => {
+      const loaded = (window as Window & { google?: GoogleIdentityApi }).google;
+      if (loaded?.accounts.id) resolve(loaded);
+      else reject(new Error("Google Identity Services did not initialize"));
+    };
+    script.onerror = () => reject(new Error("Google Identity Services could not be loaded"));
+    document.head.appendChild(script);
+  });
+  return googleIdentityScriptPromise;
+}
+
+export type NamoIDGoogleOneTapProps = {
+  redirectUri: string;
+  scopes?: string[];
+  context?: "signin" | "signup" | "use";
+  autoSelect?: boolean;
+  disabled?: boolean;
+  onError?: (error: Error) => void;
+};
+
+/**
+ * Show Google One Tap on a registered customer SPA origin, then continue
+ * through NamoID's standard authorization-code flow.
+ */
+export function NamoIDGoogleOneTap({
+  redirectUri,
+  scopes,
+  context = "signin",
+  autoSelect,
+  disabled = false,
+  onError,
+}: NamoIDGoogleOneTapProps) {
+  const client = useNamoID();
+  const { config, loading, error } = useAuthConfig();
+  const requestedScope = scopes?.join(" ") || "openid profile email";
+
+  useEffect(() => {
+    if (disabled || loading || error || !config?.google_one_tap || !redirectUri) return;
+    let active = true;
+    let google: GoogleIdentityApi | null = null;
+    const oneTap = config.google_one_tap;
+
+    const start = async () => {
+      try {
+        const transaction = await client.hostedAuth.createTransaction(redirectUri);
+        if (!active) return;
+        sessionStorage.setItem(
+          transactionStorageKey(client.clientId),
+          JSON.stringify(transaction),
+        );
+        google = await loadGoogleIdentityServices();
+        if (!active) return;
+        google.accounts.id.initialize({
+          client_id: oneTap.client_id,
+          nonce: transaction.nonce,
+          auto_select: autoSelect ?? oneTap.auto_select,
+          context,
+          callback: (response) => {
+            if (!response.credential) {
+              onError?.(new Error("Google did not return a sign-in credential"));
+              return;
+            }
+            const form = document.createElement("form");
+            form.method = "POST";
+            form.action = oneTap.completion_url;
+            const values: Record<string, string> = {
+              credential: response.credential,
+              client_id: client.clientId,
+              redirect_uri: transaction.redirectUri,
+              scope: requestedScope,
+              state: transaction.state,
+              nonce: transaction.nonce,
+              code_challenge: transaction.codeChallenge,
+              code_challenge_method: transaction.codeChallengeMethod,
+            };
+            for (const [name, value] of Object.entries(values)) {
+              const input = document.createElement("input");
+              input.type = "hidden";
+              input.name = name;
+              input.value = value;
+              form.appendChild(input);
+            }
+            document.body.appendChild(form);
+            form.submit();
+          },
+        });
+        google.accounts.id.prompt();
+      } catch (value) {
+        if (active) {
+          onError?.(value instanceof Error ? value : new Error("Google One Tap failed"));
+        }
+      }
+    };
+    void start();
+    return () => {
+      active = false;
+      google?.accounts.id.cancel();
+    };
+  }, [
+    autoSelect,
+    client,
+    config,
+    context,
+    disabled,
+    error,
+    loading,
+    onError,
+    redirectUri,
+    requestedScope,
+  ]);
+
+  return null;
+}
+
 export type HostedAuthButtonProps = {
   redirectUri: string;
   prompt?: "login";

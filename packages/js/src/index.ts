@@ -41,6 +41,12 @@ export type NamoIDAuthConfig = {
   social_providers?: NamoIDSocialProvider[];
   /** Explicit native-versus-hosted ceremony contract. Optional for compatibility with older deployments. */
   sign_in_choices?: NamoIDSignInChoice[];
+  /** Browser-safe configuration for the optional Google One Tap SPA component. */
+  google_one_tap?: {
+    client_id: string;
+    completion_url: string;
+    auto_select: boolean;
+  } | null;
   login_delivery_modes: string[];
   turnstile_site_key: string | null;
   native_auth_turnstile_actions: Record<string, string>;

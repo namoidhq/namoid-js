@@ -46,6 +46,11 @@ const session = await agentAuth.sessions.create(
 // a five-minute Authorization header. Never persist or log the returned object.
 ```
 
+When a custom MCP server requires no upstream authentication, `sessions.create`
+still uses user-bound NamoID authorization. It returns `userConnectionId: null`
+because no downstream provider account is required. The NamoID Gateway and
+Runtime Session remain authenticated.
+
 The SDK sends the Application Client ID and Client Secret in dedicated NamoID
 headers and sends the current user's access token as the Bearer credential.
 Every user-bound operation requires that token explicitly; it is never cached

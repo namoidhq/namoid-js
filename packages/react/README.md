@@ -92,6 +92,36 @@ The drop-in consumes the server-resolved `sign_in_choices` contract. Native
 challenges stay in the native component; browser-redirect choices open Hosted
 Auth with the appropriate authentication-method or identity-provider hint.
 
+## Google One Tap on your application
+
+Add `NamoIDGoogleOneTap` beside your sign-in surface to offer the Google prompt
+as soon as the page loads. The component sends Google's signed credential to
+NamoID and continues through the same authorization-code with PKCE callback as
+Hosted Auth.
+
+```tsx
+import { NamoIDGoogleOneTap, NamoIDSignIn } from "@namoidhq/react";
+
+const oneTapCallback = `${window.location.origin}/auth/namoid/callback`;
+const popupCallback = `${window.location.origin}/auth/namoid/popup`;
+
+<>
+  <NamoIDGoogleOneTap redirectUri={oneTapCallback} />
+  <NamoIDSignIn
+    redirectUri={popupCallback}
+    onComplete={({ identity }) => console.log(identity.sub)}
+  />
+</>
+```
+
+Enable application-site One Tap on the Google provider in NamoID, register the
+application as a public SPA with its exact redirect URI and allowed web origin,
+and add that origin as an Authorized JavaScript origin in Google Cloud. Your
+callback page completes the result with `completeHostedAuthRedirect` like any
+other full-page Hosted Auth redirect. A restrictive Content Security Policy
+must allow `https://accounts.google.com/gsi/client` for scripts and
+`https://accounts.google.com/gsi/` for connections and frames.
+
 ## Native email OTP (Test preview)
 
 `useNamoIDNativeEmailOtp()` is the explicit headless API for the guarded

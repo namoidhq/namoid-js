@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   NamoIDProvider,
+  NamoIDGoogleOneTap,
   NamoIDNativeEmailOtpSignIn,
   NamoIDSignIn,
   NamoIDSignInModal,
@@ -29,6 +30,18 @@ test("drop-in sign-in renders a safe loading state and NamoID trust mark", () =>
   assert.match(markup, /Secured by NamoID/);
   assert.match(markup, /disabled/);
   assert.doesNotMatch(markup, /type="password"/);
+});
+
+test("Google One Tap component renders no customer-controlled credential UI", () => {
+  const markup = renderToStaticMarkup(
+    insideProvider(
+      createElement(NamoIDGoogleOneTap, {
+        redirectUri: commonProps.redirectUri,
+      }),
+    ),
+  );
+
+  assert.equal(markup, "");
 });
 
 test("modal wrapper exposes an accessible dialog and close control", () => {

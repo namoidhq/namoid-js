@@ -42,6 +42,11 @@ const config = {
       authorization_parameter: "identity_provider",
     },
   ],
+  google_one_tap: {
+    client_id: "google-browser-client.apps.googleusercontent.com",
+    completion_url: `${issuer}/auth/social/google/one-tap/embedded`,
+    auto_select: false,
+  },
   login_delivery_modes: ["redirect", "native"],
   turnstile_site_key: "test-site-key",
   native_auth_turnstile_actions: {
@@ -99,6 +104,7 @@ test("browser client exposes the server-resolved sign-in delivery contract", asy
 
   const resolved = await client.auth.getConfig();
   assert.deepEqual(resolved.sign_in_choices, config.sign_in_choices);
+  assert.deepEqual(resolved.google_one_tap, config.google_one_tap);
 });
 
 test("browser client resolves discovery and builds Authorization Code + PKCE", async () => {

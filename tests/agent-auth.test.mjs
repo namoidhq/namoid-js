@@ -162,6 +162,32 @@ test("MCP session creation omits account selection for one compatible Connection
   assert.equal(session.userConnectionId, "server-resolved-account");
 });
 
+test("custom MCP sessions accept a null User connection", async () => {
+  const agentAuth = client(async () =>
+    Response.json(
+      {
+        id: "session-1",
+        gateway_id: "gateway-1",
+        gateway_revision_id: "revision-1",
+        connected_account_id: null,
+        status: "active",
+        expires_at: "2026-08-14T12:05:00Z",
+        revoked_at: null,
+        revoked_reason: null,
+        created_at: "2026-08-14T12:00:00Z",
+        token: "namoid_agent_auth_st_secret",
+        gateway_url: "/mcp/calendar-reader",
+      },
+      { status: 201 },
+    ),
+  );
+
+  const session = await agentAuth.sessions.create({ gatewayId: "gateway-1" }, user);
+
+  assert.equal(session.userConnectionId, null);
+  assert.equal(session.mcp.url, "http://localhost:8000/mcp/calendar-reader");
+});
+
 test("structured server errors retain safe recovery details", async () => {
   const agentAuth = client(async () =>
     Response.json(
@@ -239,5 +265,23 @@ test("invalid Application credentials are distinct from invalid user assertions"
 
   await assert.rejects(agentAuth.userConnections.list(user), {
     code: "application_not_authorized",
+  });
+});
+
+test("only read requests advertise safe retries before idempotency exists", async () => {
+  const agentAuth = client(async () =>
+    Response.json(
+      { error: "upstream_error", message: "temporarily unavailable", detail: {} },
+      { status: 503 },
+    ),
+  );
+
+  await assert.rejects(agentAuth.userConnections.list(user), {
+    code: "provider_unavailable",
+    retryable: true,
+  });
+  await assert.rejects(agentAuth.sessions.create({ gatewayId: "gateway-1" }, user), {
+    code: "provider_unavailable",
+    retryable: false,
   });
 });
