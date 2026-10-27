@@ -65,6 +65,33 @@ configure scopes for ordinary sign-in. A refresh token is returned only when
 the issuer grants `offline_access`; store it only in a protected server-side
 session.
 
+## Request phone details or other additional scopes
+
+Use `additionalScopes` when the application needs more than the default identity
+claims. For example, request verified phone details with:
+
+```ts
+export const namoid = createNamoIDNextClient({
+  clientId: process.env.NAMOID_CLIENT_ID!,
+  clientSecret: process.env.NAMOID_CLIENT_SECRET!,
+  appBaseUrl: process.env.NEXT_PUBLIC_APP_URL!,
+  additionalScopes: ["phone"],
+});
+```
+
+Additional scopes are merged with `openid profile email offline_access` and
+deduplicated. They apply to both `login()` and `createTransaction()`. The
+application must be configured to allow each requested scope; otherwise the
+issuer returns `invalid_scope`. Passing `scope` through `extraParams` does not
+override the SDK's scope selection.
+
+The `phone` scope requests phone claims; it does not select Phone OTP as the
+sign-in method or require a user to have a phone number. When the issuer returns
+them, read `identity.phone_number` and `identity.phone_number_verified` in the
+callback's `onSuccess` handler. Keep the returned tokens in the server-side
+session. Refresh continues using the original grant without requesting broader
+permissions.
+
 ## Refresh and logout
 
 ```ts

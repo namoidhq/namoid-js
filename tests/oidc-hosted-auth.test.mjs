@@ -72,7 +72,7 @@ const discovery = {
   grant_types_supported: ["authorization_code", "refresh_token"],
   code_challenge_methods_supported: ["S256"],
   token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
-  scopes_supported: ["openid", "profile", "email", "offline_access"],
+  scopes_supported: ["openid", "profile", "email", "phone", "offline_access"],
   authorization_response_iss_parameter_supported: true,
 };
 
@@ -507,76 +507,127 @@ test("refresh, UserInfo, and revocation use discovered standard endpoints", asyn
   assert.equal(new URLSearchParams(seen[2].init.body).get("token"), "refresh");
 });
 
-test("Next.js callback validates state, issuer, signed ID token, nonce, and UserInfo", async () => {
-  const { privateKey, publicKey } = await generateKeyPair("RS256");
-  const publicJwk = await exportJWK(publicKey);
-  publicJwk.kid = "test-key";
-  const fetcher = async (request, init = {}) => {
-    const url = new URL(request);
-    const metadata = metadataResponse(url);
-    if (metadata) return metadata;
-    if (url.pathname === "/v1/oauth/jwks.json") {
-      return Response.json({ keys: [publicJwk] });
-    }
-    if (url.pathname === "/v1/oauth/userinfo") {
-      assert.equal(init.headers.authorization, "Bearer access");
-      return Response.json({ sub: "user-1", email: "user@example.com" });
-    }
-    throw new Error(`Unexpected request: ${url}`);
-  };
-  const client = createNamoIDNextClient({
-    clientId,
-    clientSecret,
-    appBaseUrl: "https://app.example.com",
-    fetcher: async (request, init = {}) => {
+for (const additionalScopes of [[], ["phone", "email", "phone"]]) {
+  test(`Next.js login merges additional scopes without replacing defaults: ${JSON.stringify(additionalScopes)}`, async () => {
+    let refreshBody;
+    const client = createNamoIDNextClient({
+      clientId,
+      clientSecret,
+      appBaseUrl: "https://app.example.com",
+      additionalScopes,
+      fetcher: async (request, init = {}) => {
+        const url = new URL(request);
+        const metadata = metadataResponse(url);
+        if (metadata) return metadata;
+        if (url.pathname === "/v1/oauth/token") {
+          refreshBody = new URLSearchParams(init.body);
+          return Response.json({
+            access_token: "refreshed-access",
+            token_type: "Bearer",
+            expires_in: 300,
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      },
+    });
+    const response = await client.login({ extraParams: { scope: "unapproved-scope" } });
+    const url = new URL(response.headers.get("location"));
+    assert.equal(
+      url.searchParams.get("scope"),
+      additionalScopes.length ? "openid profile email offline_access phone" : "openid profile email offline_access",
+    );
+    assert.equal(url.searchParams.get("code_challenge_method"), "S256");
+    assert.ok(url.searchParams.get("state"));
+    assert.ok(url.searchParams.get("nonce"));
+    assert.match(response.headers.get("set-cookie"), /HttpOnly/);
+    await client.refresh("existing-refresh-token");
+    assert.equal(refreshBody.get("grant_type"), "refresh_token");
+    assert.equal(refreshBody.get("refresh_token"), "existing-refresh-token");
+    assert.equal(refreshBody.has("scope"), false);
+  });
+}
+
+for (const additionalScopes of [undefined, ["phone"]]) {
+  const phoneClaims = additionalScopes ? {
+    phone_number: "+919876543210",
+    phone_number_verified: true,
+  } : {};
+  test(`Next.js callback validates identity with additionalScopes=${JSON.stringify(additionalScopes)}`, async () => {
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const publicJwk = await exportJWK(publicKey);
+    publicJwk.kid = "test-key";
+    const fetcher = async (request, init = {}) => {
       const url = new URL(request);
-      if (url.pathname === "/v1/oauth/token") {
-        const transactionNonce = currentTransaction.nonce;
-        const idToken = await new SignJWT({ nonce: transactionNonce })
-          .setProtectedHeader({ alg: "RS256", kid: "test-key" })
-          .setIssuer(issuer)
-          .setAudience(clientId)
-          .setSubject("user-1")
-          .setIssuedAt()
-          .setExpirationTime("5m")
-          .sign(privateKey);
-        return Response.json({
-          access_token: "access",
-          token_type: "Bearer",
-          expires_in: 300,
-          refresh_token: "refresh",
-          id_token: idToken,
-        });
+      const metadata = metadataResponse(url);
+      if (metadata) return metadata;
+      if (url.pathname === "/v1/oauth/jwks.json") {
+        return Response.json({ keys: [publicJwk] });
       }
-      return fetcher(request, init);
-    },
-  });
-  const { authorizationUrl, transaction: currentTransaction } =
-    await client.createTransaction({ returnTo: "/dashboard" });
-  assert.equal(new URL(authorizationUrl).pathname, "/oauth/authorize");
-  assert.equal(
-    new URL(authorizationUrl).searchParams.get("scope"),
-    "openid profile email offline_access",
-  );
+      if (url.pathname === "/v1/oauth/userinfo") {
+        assert.equal(init.headers.authorization, "Bearer access");
+        return Response.json({ sub: "user-1", email: "user@example.com", ...phoneClaims });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    const client = createNamoIDNextClient({
+      clientId,
+      clientSecret,
+      additionalScopes,
+      appBaseUrl: "https://app.example.com",
+      fetcher: async (request, init = {}) => {
+        const url = new URL(request);
+        if (url.pathname === "/v1/oauth/token") {
+          const transactionNonce = currentTransaction.nonce;
+          const idToken = await new SignJWT({ nonce: transactionNonce, ...phoneClaims })
+            .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+            .setIssuer(issuer)
+            .setAudience(clientId)
+            .setSubject("user-1")
+            .setIssuedAt()
+            .setExpirationTime("5m")
+            .sign(privateKey);
+          return Response.json({
+            access_token: "access",
+            token_type: "Bearer",
+            expires_in: 300,
+            refresh_token: "refresh",
+            id_token: idToken,
+          });
+        }
+        return fetcher(request, init);
+      },
+    });
+    const { authorizationUrl, transaction: currentTransaction } =
+      await client.createTransaction({ returnTo: "/dashboard" });
+    assert.equal(new URL(authorizationUrl).pathname, "/oauth/authorize");
+    assert.equal(
+      new URL(authorizationUrl).searchParams.get("scope"),
+      additionalScopes ? "openid profile email offline_access phone" : "openid profile email offline_access",
+    );
 
-  const request = new Request(
-    `${redirectUri}?code=code&state=${currentTransaction.state}&iss=${encodeURIComponent(issuer)}`,
-    { headers: { cookie: transactionCookie(currentTransaction) } },
-  );
-  let successContext;
-  const response = await client.callback(request, {
-    onSuccess: (context) => {
-      successContext = context;
-      return Response.redirect("https://app.example.com/dashboard");
-    },
+    const request = new Request(
+      `${redirectUri}?code=code&state=${currentTransaction.state}&iss=${encodeURIComponent(issuer)}`,
+      { headers: { cookie: transactionCookie(currentTransaction) } },
+    );
+    let successContext;
+    const response = await client.callback(request, {
+      onSuccess: (context) => {
+        successContext = context;
+        return Response.redirect("https://app.example.com/dashboard");
+      },
+    });
+
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "https://app.example.com/dashboard");
+    assert.equal(successContext.identity.email, "user@example.com");
+    assert.equal(successContext.idTokenClaims.sub, "user-1");
+    assert.equal(successContext.identity.phone_number, phoneClaims.phone_number);
+    assert.equal(successContext.identity.phone_number_verified, phoneClaims.phone_number_verified);
+    assert.equal(successContext.idTokenClaims.phone_number, phoneClaims.phone_number);
+    assert.match(response.headers.get("set-cookie"), /namoid_state=; Max-Age=0/);
   });
 
-  assert.equal(response.status, 302);
-  assert.equal(response.headers.get("location"), "https://app.example.com/dashboard");
-  assert.equal(successContext.identity.email, "user@example.com");
-  assert.equal(successContext.idTokenClaims.sub, "user-1");
-  assert.match(response.headers.get("set-cookie"), /namoid_state=; Max-Age=0/);
-});
+}
 
 test("Next.js logout revokes the app grant and uses RP-initiated logout", async () => {
   let revoked = false;

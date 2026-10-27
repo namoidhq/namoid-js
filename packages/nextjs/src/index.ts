@@ -11,6 +11,8 @@ export type NamoIDNextOptions = {
   clientId: string;
   clientSecret: string;
   appBaseUrl: string;
+  /** Extra scopes to request alongside openid, profile, email, and offline_access. */
+  additionalScopes?: readonly string[];
   callbackPath?: string;
   postLoginRedirectPath?: string;
   postLogoutRedirectPath?: string;
@@ -93,6 +95,7 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
   const transactionMaxAgeSeconds =
     options.transactionMaxAgeSeconds ?? DEFAULT_TRANSACTION_MAX_AGE_SECONDS;
   const fetcher = options.fetcher ?? globalThis.fetch;
+  const sessionScopes = [...SESSION_SCOPES, ...(options.additionalScopes ?? [])];
 
   if (!fetcher) {
     throw new NamoIDError("fetch is not available; pass a fetcher option", {
@@ -236,7 +239,7 @@ export function createNamoIDNextClient(options: NamoIDNextOptions): NamoIDNextCl
       loginOptions.callbackUrl ?? absoluteUrl(appBaseUrl, callbackPath);
     const started = await oidc.hostedAuth.start({
       redirectUri,
-      scopes: SESSION_SCOPES,
+      scopes: sessionScopes,
       prompt: loginOptions.prompt,
       resource: loginOptions.resource,
       extraParams: loginOptions.extraParams,
